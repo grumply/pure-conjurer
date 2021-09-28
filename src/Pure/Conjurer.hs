@@ -367,17 +367,18 @@ ref = lref . resourceLocation
 goto :: IsResource resource => ResourceRoute resource -> IO ()
 goto = Router.goto . resourceLocation
 
-resourcePage :: forall resource. 
-                ( Typeable resource
+resourcePage :: forall _role resource. 
+                ( Typeable _role
+                , Typeable resource
                 , IsResource resource, ToJSON (Resource resource), FromJSON (Resource resource)
                 , Form (Resource resource)
                 , Theme resource
-                , Component (Maybe (Resource resource))
+                , Component (Resource resource)
                 , ToJSON (Proxy resource)
                 ) => WebSocket -> ResourceRoute resource -> View
 resourcePage ws CreateResource =
   let onSubmit resource = void (sync (request (resourceAPI @resource) ws (createResource @resource) resource))
-  in Div <| Themed @CreateResource . Themed @resource |> [ form onSubmit ]
+  in withToken @_role $ maybe "Not Authorized" (\_ -> Div <| Themed @CreateResource . Themed @resource |> [ form onSubmit ])
 resourcePage ws ListResources = producing producer (consuming (maybe Pure.Null consumer))
   where
     producer = sync (request (resourceAPI @resource) ws (listResources @resource) (Proxy @resource))
@@ -400,10 +401,11 @@ resourcePage ws ListResources = producing producer (consuming (maybe Pure.Null c
                   _ -> pure ()
           ]
         )
-resourcePage ws (UpdateResource s) = producing producer (consuming consumer)
+resourcePage ws (UpdateResource s) = withToken @_role $ maybe "Not Authorized" (\_ -> producing producer (consuming consumer))
   where
     producer = sync (request (resourceAPI @resource) ws (readResource @resource) s)
-    consumer = maybe Pure.Null (const "TODO")
-resourcePage ws (ReadResource s) = producing producer (consuming run)
+    consumer = maybe "Not Found" (const "TODO: Update Resource")
+resourcePage ws (ReadResource s) = withToken @_role $ maybe "Not Authorized" (\_ -> producing producer (consuming consumer))
   where
     producer = sync (request (resourceAPI @resource) ws (readResource @resource) s)
+    consumer = maybe "Not Found" run
