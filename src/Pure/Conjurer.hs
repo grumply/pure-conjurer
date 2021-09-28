@@ -83,7 +83,7 @@ data IndexMsg resource
   deriving anyclass (ToJSON,FromJSON)
 
 instance (Typeable resource, ToJSON (IndexMsg resource), FromJSON (IndexMsg resource)) => Source (IndexMsg resource) where
-  data Stream (IndexMsg resource) = IndexStream (Proxy resource)
+  data Stream (IndexMsg resource) = IndexStream
     deriving stock Generic
     deriving anyclass Hashable
 
@@ -146,7 +146,7 @@ deleteResource = Proxy
 data ListResources resource
 instance Identify (ListResources resource)
 instance (Typeable resource, IsResource resource) => Request (ListResources resource) where
-  type Req (ListResources resource) = (Int,Proxy resource)
+  type Req (ListResources resource) = (Int,())
   type Rsp (ListResources resource) = Maybe [Slug resource]
 
 listResources :: Proxy (ListResources resource)
@@ -209,7 +209,7 @@ defaultCallbacks =
       , onList   = logJSON ("Listed " <> tc)
       }
 
-resourceBackend :: ( Typeable resource, IsResource resource, ToJSON (Resource resource), FromJSON (Resource resource), ToJSON (Proxy resource), FromJSON (Proxy resource) )
+resourceBackend :: ( Typeable resource, IsResource resource, ToJSON (Resource resource), FromJSON (Resource resource) )
                 => Permissions resource -> Callbacks resource -> Endpoints '[] (ResourceCRUDL resource) '[] (ResourceCRUDL resource)
 resourceBackend permissions callbacks = Endpoints resourceAPI msgs reqs
   where
@@ -233,7 +233,7 @@ handleCreateResource Permissions { canCreate } Callbacks { onCreate } = respondi
     result <- Sorcerer.transact (ResourceStream k :: Stream (ResourceMsg resource)) (ResourceCreated resource)
     case result of
       Update (_ :: Resource resource) -> do
-        Sorcerer.write (IndexStream (Proxy @resource)) (ResourceAdded k)
+        Sorcerer.write (IndexStream @resource) (ResourceAdded k)
         reply (Just True)
         liftIO (onCreate k (Just resource))
       _ -> do
@@ -288,7 +288,7 @@ handleDeleteResource Permissions { canDelete } Callbacks { onDelete } = respondi
     result <- Sorcerer.transact (ResourceStream k :: Stream (ResourceMsg resource)) ResourceDeleted
     case result of
       (Delete :: Maybe (Maybe (Resource resource))) -> do
-        Sorcerer.write (IndexStream (Proxy :: Proxy resource)) (ResourceRemoved k)
+        Sorcerer.write (IndexStream @resource) (ResourceRemoved k)
         liftIO (onDelete k True)
         reply (Just True)
       _ -> do
@@ -298,13 +298,12 @@ handleDeleteResource Permissions { canDelete } Callbacks { onDelete } = respondi
     reply Nothing
 
 handleListResources
-  :: forall resource. (Typeable resource, IsResource resource, FromJSON (Proxy resource) )
+  :: forall resource. (Typeable resource, IsResource resource )
   => Permissions resource -> Callbacks resource -> RequestHandler (ListResources resource)
 handleListResources Permissions { canList } Callbacks { onList } = responding do
-  p <- acquire
   can <- liftIO canList
   if can then do
-    mr <- Sorcerer.read (IndexStream p) 
+    mr <- Sorcerer.read (IndexStream @resource) 
     reply (Just (maybe [] resources mr))
     liftIO onList
   else do
@@ -374,14 +373,13 @@ resourcePage :: forall _role resource.
                 , Form (Resource resource)
                 , Theme resource
                 , Component (Resource resource)
-                , ToJSON (Proxy resource)
                 ) => WebSocket -> ResourceRoute resource -> View
 resourcePage ws CreateResource =
   let onSubmit resource = void (sync (request (resourceAPI @resource) ws (createResource @resource) resource))
   in withToken @_role $ maybe "Not Authorized" (\_ -> Div <| Themed @CreateResource . Themed @resource |> [ form onSubmit ])
-resourcePage ws ListResources = producing producer (consuming (maybe Pure.Null consumer))
+resourcePage ws ListResources = withToken @_role $ maybe "Not Authorized" (\_ -> producing producer (consuming (maybe Pure.Null consumer)))
   where
-    producer = sync (request (resourceAPI @resource) ws (listResources @resource) (Proxy @resource))
+    producer = sync (request (resourceAPI @resource) ws (listResources @resource) ())
     consumer ss = 
       Table <| Themed @ListResources . Themed @resource |>
         ( Tr <||>
