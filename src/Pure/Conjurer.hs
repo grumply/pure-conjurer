@@ -66,7 +66,7 @@ instance (Typeable resource, ToJSON (ResourceMsg resource), FromJSON (ResourceMs
     deriving anyclass Hashable
 
 instance (Typeable resource, FromJSON (Resource resource), ToJSON (Resource resource)) => Aggregable (ResourceMsg resource) (Resource resource) where
-  update (ResourceCreated r) _ = Update r
+  update (ResourceCreated r) Nothing = Update r
   update (ResourceUpdated r) (Just _) = Update r
   update ResourceDeleted (Just _) = Delete
   update _ _ = Ignore
