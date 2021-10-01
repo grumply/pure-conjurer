@@ -5,6 +5,10 @@
   #-}
 module Pure.Conjurer where
 
+{-
+TODO: interface hiding via export control
+-}
+
 import Pure.Conjurer.Form
 
 import Pure.Auth (Username,Token(..),withToken)
@@ -252,6 +256,93 @@ resourceDB =
   , listener @(ListingMsg resource) @(Listing resource)
   ]
 
+newKey :: IO (Key resource)
+newKey = Key <$> markIO
+
+tryCreateResource 
+  :: forall resource. 
+    ( Typeable resource
+    , IsResource resource
+    , Eq (Identifier resource), Hashable (Identifier resource)
+    , ToJSON (Identifier resource) , ToJSON (Product resource), ToJSON (Preview resource), ToJSON (Resource resource)
+    , FromJSON (Identifier resource), FromJSON (Product resource), FromJSON (Preview resource), FromJSON (Resource resource)
+    , Previewable resource, Producible resource
+    ) => Callbacks resource -> Owner -> Key resource -> Resource resource -> IO Bool
+tryCreateResource Callbacks {..} owner key resource =
+  -- In the rare (nearly-impossible?) case that this key is already used, trying to re-create a resource
+  -- will fail with `Ignored` and this method will return False.
+  Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) (ResourceCreated resource) >>= \case
+    Added (_ :: Resource resource) -> do
+      let i = identifyResource resource
+      pro <- produce resource
+      pre <- preview pro
+      Sorcerer.write (IndexStream @resource) (ResourceAdded owner key)
+      Sorcerer.write (ProductStream owner i) (ProductCreated pro)
+      Sorcerer.write (PreviewStream owner i) (PreviewCreated pre)
+      ~(Update (Listing globalListing)) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemAdded pre)
+      ~(Update (Listing userListing)) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemAdded pre)
+      onCreateResource owner i key resource
+      onCreateProduct owner i pro
+      onCreatePreview owner i pre
+      onUpdateListing Nothing globalListing
+      onUpdateListing (Just owner) userListing
+      pure True
+    _ ->
+      pure False
+
+tryUpdateResource 
+  :: forall resource. 
+    ( Typeable resource
+    , IsResource resource
+    , Eq (Identifier resource), Hashable (Identifier resource)
+    , ToJSON (Identifier resource), ToJSON (Product resource), ToJSON (Preview resource), ToJSON (Resource resource)
+    , FromJSON (Identifier resource), FromJSON (Product resource), FromJSON (Preview resource), FromJSON (Resource resource)
+    , Previewable resource, Producible resource
+    ) => Callbacks resource -> Owner -> Key resource -> Resource resource -> IO Bool
+tryUpdateResource Callbacks {..} owner key resource =
+  Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) (ResourceCreated resource) >>= \case
+    Updated _ (_ :: Resource resource) -> do
+      let i = identifyResource resource
+      pro <- produce resource
+      pre <- preview pro
+      Sorcerer.write (ProductStream owner i) (ProductUpdated pro)
+      Sorcerer.write (PreviewStream owner i) (PreviewUpdated pre)
+      ~(Update (Listing globalListing)) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemAdded pre)
+      ~(Update (Listing userListing)) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemAdded pre)
+      onUpdateResource owner i key resource
+      onUpdateProduct owner i pro
+      onUpdatePreview owner i pre
+      onUpdateListing Nothing globalListing
+      onUpdateListing (Just owner) userListing
+      pure True
+    _ ->
+      pure False
+
+tryDeleteResource 
+  :: forall resource. 
+    ( Typeable resource
+    , IsResource resource
+    , Eq (Identifier resource), Hashable (Identifier resource)
+    , ToJSON (Identifier resource) , ToJSON (Product resource), ToJSON (Preview resource), ToJSON (Resource resource)
+    , FromJSON (Identifier resource), FromJSON (Product resource), FromJSON (Preview resource), FromJSON (Resource resource)
+    ) => Callbacks resource -> Owner -> Key resource -> IO Bool
+tryDeleteResource Callbacks {..} owner key =
+  Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) ResourceDeleted >>= \case
+    Deleted r -> do
+      let i = identifyResource r
+      ~(Deleted pre) <- Sorcerer.observe (PreviewStream owner i) PreviewDeleted
+      ~(Deleted pro) <- Sorcerer.observe (ProductStream owner i) ProductDeleted
+      ~(Update (Listing globalListing)) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemRemoved i)
+      ~(Update (Listing userListing)) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemRemoved i)
+      onDeleteResource owner i key r
+      onDeletePreview owner i pre
+      onDeleteProduct owner i pro
+      onUpdateListing Nothing globalListing
+      onUpdateListing (Just owner) userListing
+      pure True
+    _ -> do
+      pure False
+
 --------------------------------------------------------------------------------
 -- Sadly, polymorphic API endpoints can't currently be derived with 
 -- mkRequest/mkMessage
@@ -459,37 +550,23 @@ handleCreateResource
      , FromJSON (Preview resource), ToJSON (Preview resource)
      , FromJSON (Identifier resource), ToJSON (Identifier resource), Hashable (Identifier resource), Eq (Identifier resource)
      ) => Self -> Permissions resource -> Callbacks resource -> RequestHandler (CreateResource resource)
-handleCreateResource self Permissions {..} Callbacks {..} = responding do
+handleCreateResource self Permissions { canCreateResource } callbacks = responding do
   (owner :: Owner,resource :: Resource resource) <- acquire
-  k <- liftIO (Key <$> markIO)
-  can <- liftIO (canCreateResource self owner k)
-  if can then do
-    result <- Sorcerer.observe (ResourceStream owner k :: Stream (ResourceMsg resource)) (ResourceCreated resource)
-    case result of
-      Added (_ :: Resource resource) -> do
-        let i = identifyResource resource
-        pro <- liftIO (produce resource)
-        pre <- liftIO (preview pro)
-        Sorcerer.write (IndexStream @resource) (ResourceAdded owner k)
-        Sorcerer.write (ProductStream owner i) (ProductCreated pro)
-        Sorcerer.write (PreviewStream owner i) (PreviewCreated pre)
-        ~(Update (Listing globalListing)) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemAdded pre)
-        ~(Update (Listing userListing)) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemAdded pre)
-        liftIO (onCreateResource owner i k resource)
-        liftIO (onCreateProduct owner i pro)
-        liftIO (onCreatePreview owner i pre)
-        liftIO (onUpdateListing Nothing globalListing)
-        liftIO (onUpdateListing (Just owner) userListing)
-        reply (Just i)
-      _ -> do
-        reply Nothing
-  else
-    reply Nothing
+  response <- liftIO do
+    key <- newKey
+    can <- canCreateResource self owner key
+    if can then
+      tryCreateResource callbacks owner key resource >>= \case
+        True -> pure (Just (identifyResource resource))
+        _    -> pure Nothing
+    else
+      pure Nothing
+  reply response
 
 handleReadResource 
   :: forall resource. (Typeable resource, IsResource resource, ToJSON (Resource resource), FromJSON (Resource resource) ) 
   => Self -> Permissions resource -> Callbacks resource -> RequestHandler (ReadResource resource)
-handleReadResource self Permissions {..} Callbacks {..} = responding do
+handleReadResource self Permissions { canReadResource } Callbacks {..} = responding do
   (owner :: Owner,k :: Key resource) <- acquire
   can <- liftIO (canReadResource self owner k)
   if can then do
@@ -511,30 +588,15 @@ handleUpdateResource
     , FromJSON (Preview resource), ToJSON (Preview resource)
     , Eq (Identifier resource), FromJSON (Identifier resource), Hashable (Identifier resource), ToJSON (Identifier resource)
     ) => Self -> Permissions resource -> Callbacks resource -> RequestHandler (UpdateResource resource)
-handleUpdateResource self Permissions {..} Callbacks {..} = responding do
-  (owner :: Owner,k,resource :: Resource resource) <- acquire
-  can <- liftIO (canUpdateResource self owner k)
-  if can then do
-    result <- Sorcerer.transact (ResourceStream owner k :: Stream (ResourceMsg resource)) (ResourceUpdated resource)
-    case result of
-      Update (r :: Resource resource) -> do
-        let i = identifyResource resource
-        pro <- liftIO (produce resource)
-        pre <- liftIO (preview pro)
-        Sorcerer.write (ProductStream owner i) (ProductUpdated pro)
-        Sorcerer.write (PreviewStream owner i) (PreviewUpdated pre)
-        ~(Update (Listing globalListing)) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemUpdated pre)
-        ~(Update (Listing userListing)) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemUpdated pre)
-        liftIO (onUpdateResource owner i k resource)
-        liftIO (onUpdateProduct owner i pro)
-        liftIO (onUpdatePreview owner i pre)
-        liftIO (onUpdateListing Nothing globalListing)
-        liftIO (onUpdateListing (Just owner) userListing)
-        reply (Just True)
-      _ -> do
-        reply (Just False)
-  else
-    reply Nothing
+handleUpdateResource self Permissions { canUpdateResource } callbacks = responding do
+  (owner :: Owner,key :: Key resource,resource :: Resource resource) <- acquire
+  response <- liftIO do
+    can <- canUpdateResource self owner key
+    if can then
+      Just <$> tryUpdateResource callbacks owner key resource
+    else
+      pure Nothing
+  reply response
 
 handleDeleteResource
   :: forall resource. 
@@ -544,28 +606,15 @@ handleDeleteResource
      , ToJSON (Preview resource), FromJSON (Preview resource)
      , Eq (Identifier resource), Hashable (Identifier resource), ToJSON (Identifier resource), FromJSON (Identifier resource)
      ) => Self -> Permissions resource -> Callbacks resource -> RequestHandler (DeleteResource resource)
-handleDeleteResource self Permissions {..} Callbacks {..} = responding do
-  (owner :: Owner,k :: Key resource) <- acquire
-  can <- liftIO (canDeleteResource self owner k) 
-  if can then do
-    result <- Sorcerer.observe (ResourceStream owner k :: Stream (ResourceMsg resource)) ResourceDeleted
-    case result of
-      Deleted r -> do
-        let i = identifyResource r
-        ~(Deleted pre) <- Sorcerer.observe (PreviewStream owner i) PreviewDeleted
-        ~(Deleted pro) <- Sorcerer.observe (ProductStream owner i) ProductDeleted
-        ~(Update (Listing globalListing)) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemRemoved i)
-        ~(Update (Listing userListing)) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemRemoved i)
-        liftIO (onDeleteResource owner i k r)
-        liftIO (onDeletePreview owner i pre)
-        liftIO (onDeleteProduct owner i pro)
-        liftIO (onUpdateListing Nothing globalListing)
-        liftIO (onUpdateListing (Just owner) userListing)
-        reply (Just True)
-      _ -> do
-        reply (Just False)
-  else do
-    reply Nothing
+handleDeleteResource self Permissions { canDeleteResource } callbacks = responding do
+  (owner :: Owner,key :: Key resource) <- acquire
+  response <- liftIO do
+    can <- canDeleteResource self owner key
+    if can then
+      Just <$> tryDeleteResource callbacks owner key    
+    else do
+      pure Nothing
+  reply response
 
 handleReadProduct
   :: forall resource. 
@@ -678,6 +727,14 @@ ref = lref . resourceLocation
 
 goto :: IsResource resource => ResourceRoute resource -> IO ()
 goto = Router.goto . resourceLocation
+
+{-
+TODO: refine and improve resourcePage
+
+* Add delete buttons to ListPreviews if the user is logged in and owns the listing.
+* Add controls to product/preview if the user is logged in and owns the resource.
+
+-}
 
 resourcePage :: forall _role resource. 
                 ( Typeable _role
