@@ -10,6 +10,7 @@ TODO: interface hiding via export control
 -}
 
 import Pure.Conjurer.Form
+import Pure.Conjurer.Form.Field
 
 import Pure.Auth (Username,Token(..),withToken)
 import Pure.Sync
@@ -51,7 +52,11 @@ instance FromTxt (Slug a) where
 
 instance ToTxt (Slug a) where
   toTxt (Slug t) = t
- 
+
+instance Field (Slug a) where
+  field onchange current =
+    Input <| OnInput (withInput onchange) . Value (toTxt current)
+
 -- Idempotent.
 --
 -- prop> \(x :: String) -> toSlug (toTxt (toSlug (toTxt x))) == toSlug (toTxt x)
