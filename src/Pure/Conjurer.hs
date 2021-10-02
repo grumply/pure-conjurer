@@ -20,7 +20,7 @@ import Pure.Elm.Component hiding (key,pattern Delete,Listener,root,pattern Form)
 import qualified Pure.Elm.Component as Pure
 import Pure.Hooks hiding (dispatch)
 import Pure.Maybe
-import Pure.WebSocket as WS hiding (Index)
+import Pure.WebSocket as WS hiding (Index,identify)
 import Pure.Router hiding (goto)
 import qualified Pure.Router as Router
 import Pure.Sorcerer as Sorcerer
@@ -47,20 +47,23 @@ newtype Key a = Key Marker
   deriving (ToJSON,FromJSON,Eq,Ord,Hashable) via Marker
 type role Key nominal
 
-class Typeable resource => IsResource resource where
-  data Identifier resource :: *
-  data Resource resource :: *
-  data Product resource :: *
-  data Preview resource :: *
+data family Identifier resource :: *
+data family Resource resource :: *
+data family Product resource :: *
+data family Preview resource :: *
 
-  identifyResource :: Resource resource -> Identifier resource
-  identifyProduct :: Product resource -> Identifier resource
-  identifyPreview :: Preview resource -> Identifier resource
+class Identifiable f resource where
+  identify :: f resource -> Identifier resource
+
+class Typeable resource => Routable resource where
+  root :: Txt
+  root = "/" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: resource)))))
 
   route :: (Identifier resource -> rt) -> Routing rt (Maybe x)
+
   locate :: Identifier resource -> Txt
 
-class (Typeable resource, IsResource resource) => Producible resource where
+class Typeable resource => Producible resource where
   -- It's possible that product is not needed for some particular use-case
   -- where the productmsg/product listener isn't initialized. For that
   -- case, there is a default instance that returns an error - attempting
@@ -69,21 +72,19 @@ class (Typeable resource, IsResource resource) => Producible resource where
   produce :: Resource resource -> IO (Product resource)
   produce _ = 
     let tc = show (typeRepTyCon (typeOf (undefined :: resource)))
-    in pure (error $ "IsResource " <> tc <> " => produce :: Resource " <> tc <> " -> IO (Product " <> tc <> "): Not implemented.")
+    in pure (error $ "Producible " <> tc <> " => produce :: Resource " <> tc <> " -> IO (Product " <> tc <> "): Not implemented.")
 
-class (Typeable resource, IsResource resource, Producible resource) => Previewable resource where
+class Typeable resource => Previewable resource where
   -- It's possible that preview is not needed for some particular use-case
   -- where the previewmsg/preview listener isn't initialized. For that
   -- case, there is a default instance that returns an error - attempting
   -- to force the produced `Preview resource` from this default instance
   -- will throw a helpful error.
-  preview :: Product resource -> IO (Preview resource)
-  preview _ =
+  preview :: Resource resource -> Product resource -> IO (Preview resource)
+  preview _ _ =
     let tc = show (typeRepTyCon (typeOf (undefined :: resource)))
-    in pure (error $ "IsResource " <> tc <> " => preview :: Product " <> tc <> " -> IO (Preview " <> tc <> "): Not implemented.")
+    in pure (error $ "Previewable " <> tc <> " => preview :: Resource " <> tc <> " -> Product " <> tc <> " -> IO (Preview " <> tc <> "): Not implemented.")
 
-root :: forall resource. Typeable resource => Txt
-root = "/" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: resource)))))
 
 --------------------------------------------------------------------------------
 -- Raw resource - typed storage by UUID (Key). Think S3-like where each bucket
@@ -230,24 +231,25 @@ instance (Typeable a, ToJSON (Identifier a), FromJSON (Identifier a), ToJSON (Pr
     deriving stock Generic
     deriving anyclass Hashable
 
-instance (IsResource a, Typeable a, Eq (Identifier a), ToJSON (Identifier a), ToJSON (Preview a), FromJSON (Identifier a), FromJSON (Preview a)) => Aggregable (ListingMsg a) (Listing a) where
+instance (Typeable a, Identifiable Preview a, Eq (Identifier a), ToJSON (Identifier a), ToJSON (Preview a), FromJSON (Identifier a), FromJSON (Preview a)) => Aggregable (ListingMsg a) (Listing a) where
   update (PreviewItemAdded p)   Nothing  = Update Listing { listing = [p] }
-  update (PreviewItemAdded p)   (Just l) = Update Listing { listing = p : List.filter (((/=) (identifyPreview p)) . identifyPreview) (listing l) }
-  update (PreviewItemUpdated p) (Just l) = Update l { listing = fmap (\old -> if identifyPreview old == identifyPreview p then p else old) (listing l) }
-  update (PreviewItemRemoved i) (Just l) = Update l { listing = List.filter ((/= i) . identifyPreview) (listing l) }
+  update (PreviewItemAdded p)   (Just l) = Update Listing { listing = p : List.filter (((/=) (identify p)) . identify) (listing l) }
+  update (PreviewItemUpdated p) (Just l) = Update l { listing = fmap (\old -> if identify old == identify p then p else old) (listing l) }
+  update (PreviewItemRemoved i) (Just l) = Update l { listing = List.filter ((/= i) . identify) (listing l) }
   update _ _                             = Ignore
 
 --------------------------------------------------------------------------------  
 
-resourceDB :: forall resource. 
-              ( Typeable resource
-              , IsResource resource 
-              , ToJSON (Resource resource), FromJSON (Resource resource)
-              , ToJSON (Identifier resource), FromJSON (Identifier resource), Eq (Identifier resource)
-              , ToJSON (Preview resource), FromJSON (Preview resource)
-              , ToJSON (Product resource), FromJSON (Product resource)
-              , Hashable (Identifier resource)
-              ) => [Listener]
+resourceDB 
+  :: forall resource. 
+    ( Typeable resource
+    , Identifiable Preview resource
+    , ToJSON (Resource resource), FromJSON (Resource resource)
+    , ToJSON (Identifier resource), FromJSON (Identifier resource), Eq (Identifier resource)
+    , ToJSON (Preview resource), FromJSON (Preview resource)
+    , ToJSON (Product resource), FromJSON (Product resource)
+    , Hashable (Identifier resource)
+    ) => [Listener]
 resourceDB = 
   [ listener @(ResourceMsg resource) @(Resource resource)
   , listener @(IndexMsg resource) @(Index resource)
@@ -262,7 +264,8 @@ newKey = Key <$> markIO
 tryCreateResource 
   :: forall resource. 
     ( Typeable resource
-    , IsResource resource
+    , Identifiable Resource resource
+    , Identifiable Preview resource
     , Eq (Identifier resource), Hashable (Identifier resource)
     , ToJSON (Identifier resource) , ToJSON (Product resource), ToJSON (Preview resource), ToJSON (Resource resource)
     , FromJSON (Identifier resource), FromJSON (Product resource), FromJSON (Preview resource), FromJSON (Resource resource)
@@ -273,9 +276,9 @@ tryCreateResource Callbacks {..} owner key resource =
   -- will fail with `Ignored` and this method will return False.
   Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) (ResourceCreated resource) >>= \case
     Added (_ :: Resource resource) -> do
-      let i = identifyResource resource
+      let i = identify resource
       pro <- produce resource
-      pre <- preview pro
+      pre <- preview resource pro
       Sorcerer.write (IndexStream @resource) (ResourceAdded owner key)
       Sorcerer.write (ProductStream owner i) (ProductCreated pro)
       Sorcerer.write (PreviewStream owner i) (PreviewCreated pre)
@@ -293,7 +296,8 @@ tryCreateResource Callbacks {..} owner key resource =
 tryUpdateResource 
   :: forall resource. 
     ( Typeable resource
-    , IsResource resource
+    , Identifiable Resource resource
+    , Identifiable Preview resource
     , Eq (Identifier resource), Hashable (Identifier resource)
     , ToJSON (Identifier resource), ToJSON (Product resource), ToJSON (Preview resource), ToJSON (Resource resource)
     , FromJSON (Identifier resource), FromJSON (Product resource), FromJSON (Preview resource), FromJSON (Resource resource)
@@ -302,9 +306,9 @@ tryUpdateResource
 tryUpdateResource Callbacks {..} owner key resource =
   Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) (ResourceCreated resource) >>= \case
     Updated _ (_ :: Resource resource) -> do
-      let i = identifyResource resource
+      let i = identify resource
       pro <- produce resource
-      pre <- preview pro
+      pre <- preview resource pro
       Sorcerer.write (ProductStream owner i) (ProductUpdated pro)
       Sorcerer.write (PreviewStream owner i) (PreviewUpdated pre)
       ~(Update (Listing globalListing)) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemAdded pre)
@@ -321,7 +325,8 @@ tryUpdateResource Callbacks {..} owner key resource =
 tryDeleteResource 
   :: forall resource. 
     ( Typeable resource
-    , IsResource resource
+    , Identifiable Resource resource
+    , Identifiable Preview resource
     , Eq (Identifier resource), Hashable (Identifier resource)
     , ToJSON (Identifier resource) , ToJSON (Product resource), ToJSON (Preview resource), ToJSON (Resource resource)
     , FromJSON (Identifier resource), FromJSON (Product resource), FromJSON (Preview resource), FromJSON (Resource resource)
@@ -329,7 +334,7 @@ tryDeleteResource
 tryDeleteResource Callbacks {..} owner key =
   Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) ResourceDeleted >>= \case
     Deleted r -> do
-      let i = identifyResource r
+      let i = identify r
       ~(Deleted pre) <- Sorcerer.observe (PreviewStream owner i) PreviewDeleted
       ~(Deleted pro) <- Sorcerer.observe (ProductStream owner i) ProductDeleted
       ~(Update (Listing globalListing)) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemRemoved i)
@@ -349,7 +354,7 @@ tryDeleteResource Callbacks {..} owner key =
 
 data CreateResource resource
 instance Identify (CreateResource resource)
-instance (Typeable resource, IsResource resource) => Request (CreateResource resource) where
+instance (Typeable resource) => Request (CreateResource resource) where
   type Req (CreateResource resource) = (Int,(Username,Resource resource))
   type Rsp (CreateResource resource) = Maybe (Identifier resource)
 
@@ -358,7 +363,7 @@ createResource = Proxy
 
 data ReadResource resource
 instance Identify (ReadResource resource)
-instance (Typeable resource, IsResource resource) => Request (ReadResource resource) where
+instance (Typeable resource) => Request (ReadResource resource) where
   type Req (ReadResource resource) = (Int,(Username,Key resource))
   type Rsp (ReadResource resource) = Maybe (Resource resource)
 
@@ -367,7 +372,7 @@ readResource = Proxy
 
 data UpdateResource resource
 instance Identify (UpdateResource resource)
-instance (Typeable resource, IsResource resource) => Request (UpdateResource resource) where
+instance (Typeable resource) => Request (UpdateResource resource) where
   type Req (UpdateResource resource) = (Int,(Username,Key resource,Resource resource))
   type Rsp (UpdateResource resource) = Maybe Bool
 
@@ -376,7 +381,7 @@ updateResource = Proxy
 
 data DeleteResource resource
 instance Identify (DeleteResource resource)
-instance (Typeable resource, IsResource resource) => Request (DeleteResource resource) where
+instance (Typeable resource) => Request (DeleteResource resource) where
   type Req (DeleteResource resource) = (Int,(Username,Key resource))
   type Rsp (DeleteResource resource) = Maybe Bool
 
@@ -385,7 +390,7 @@ deleteResource = Proxy
 
 data ReadProduct resource
 instance Identify (ReadProduct resource)
-instance (Typeable resource, IsResource resource) => Request (ReadProduct resource) where
+instance (Typeable resource) => Request (ReadProduct resource) where
   type Req (ReadProduct resource) = (Int,(Username,Identifier resource))
   type Rsp (ReadProduct resource) = Maybe (Product resource)
 
@@ -394,7 +399,7 @@ readProduct = Proxy
 
 data ReadPreview resource
 instance Identify (ReadPreview resource)
-instance (Typeable resource, IsResource resource) => Request (ReadPreview resource) where
+instance (Typeable resource) => Request (ReadPreview resource) where
   type Req (ReadPreview resource) = (Int,(Username,Identifier resource))
   type Rsp (ReadPreview resource) = Maybe (Preview resource)
 
@@ -403,7 +408,7 @@ readPreview = Proxy
 
 data ReadListing resource
 instance Identify (ReadListing resource)
-instance (Typeable resource, IsResource resource) => Request (ReadListing resource) where
+instance (Typeable resource) => Request (ReadListing resource) where
   type Req (ReadListing resource) = (Int,Maybe Username)
   type Rsp (ReadListing resource) = Maybe [Preview resource]
 
@@ -423,7 +428,7 @@ type ResourceReadingAPI resource =
    , ReadListing resource
    ]
 
-resourcePublishingAPI :: forall resource. (Typeable resource, IsResource resource) => API _ (ResourcePublishingAPI resource)
+resourcePublishingAPI :: forall resource. Typeable resource => API _ (ResourcePublishingAPI resource)
 resourcePublishingAPI = api msgs reqs
   where
     msgs = WS.none
@@ -433,7 +438,7 @@ resourcePublishingAPI = api msgs reqs
        <:> deleteResource @resource
        <:> WS.none
 
-resourceReadingAPI :: forall resource. (Typeable resource, IsResource resource) => API _ (ResourceReadingAPI resource)
+resourceReadingAPI :: forall resource. Typeable resource => API _ (ResourceReadingAPI resource)
 resourceReadingAPI = api msgs reqs
   where
     msgs = WS.none
@@ -508,7 +513,9 @@ instance Default (Callbacks resource) where
 
 resourcePublishingBackend :: 
   ( Typeable resource
-  , IsResource resource, ToJSON (Resource resource), FromJSON (Resource resource)
+  , ToJSON (Resource resource), FromJSON (Resource resource)
+  , Identifiable Resource resource
+  , Identifiable Preview resource
   , Previewable resource, Producible resource
   , ToJSON (Identifier resource)
   , ToJSON (Product resource), FromJSON (Product resource)
@@ -526,7 +533,9 @@ resourcePublishingBackend user permissions callbacks = Endpoints resourcePublish
 
 resourceReadingBackend :: 
   ( Typeable resource
-  , IsResource resource, ToJSON (Resource resource), FromJSON (Resource resource)
+  , ToJSON (Resource resource), FromJSON (Resource resource)
+  , Identifiable Resource resource
+  , Identifiable Preview resource
   , Previewable resource, Producible resource
   , ToJSON (Identifier resource)
   , ToJSON (Product resource), FromJSON (Product resource)
@@ -544,7 +553,9 @@ resourceReadingBackend permissions callbacks = Endpoints resourceReadingAPI msgs
 handleCreateResource 
   :: forall resource. 
      ( Typeable resource
-     , IsResource resource, ToJSON (Resource resource), FromJSON (Resource resource)
+     , Identifiable Resource resource
+     , Identifiable Preview resource
+     , ToJSON (Resource resource), FromJSON (Resource resource)
      , Producible resource, Previewable resource
      , FromJSON (Product resource), ToJSON (Product resource)
      , FromJSON (Preview resource), ToJSON (Preview resource)
@@ -557,22 +568,25 @@ handleCreateResource self Permissions { canCreateResource } callbacks = respondi
     can <- canCreateResource self owner key
     if can then
       tryCreateResource callbacks owner key resource >>= \case
-        True -> pure (Just (identifyResource resource))
+        True -> pure (Just (identify resource))
         _    -> pure Nothing
     else
       pure Nothing
   reply response
 
 handleReadResource 
-  :: forall resource. (Typeable resource, IsResource resource, ToJSON (Resource resource), FromJSON (Resource resource) ) 
-  => Self -> Permissions resource -> Callbacks resource -> RequestHandler (ReadResource resource)
+  :: forall resource. 
+    ( Typeable resource
+    , ToJSON (Resource resource), FromJSON (Resource resource) 
+    , Identifiable Resource resource
+    ) => Self -> Permissions resource -> Callbacks resource -> RequestHandler (ReadResource resource)
 handleReadResource self Permissions { canReadResource } Callbacks {..} = responding do
   (owner :: Owner,k :: Key resource) <- acquire
   can <- liftIO (canReadResource self owner k)
   if can then do
     Sorcerer.read (ResourceStream owner k :: Stream (ResourceMsg resource)) >>= \case
       Just r -> do
-        liftIO (onReadResource owner (identifyResource r) k r)
+        liftIO (onReadResource owner (identify r) k r)
         reply (Just r)
       _ -> do
         reply Nothing
@@ -582,7 +596,9 @@ handleReadResource self Permissions { canReadResource } Callbacks {..} = respond
 handleUpdateResource
   :: forall resource. 
     ( Typeable resource
-    , IsResource resource, ToJSON (Resource resource), FromJSON (Resource resource) 
+    , Identifiable Resource resource
+    , Identifiable Preview resource
+    , ToJSON (Resource resource), FromJSON (Resource resource) 
     , Producible resource, Previewable resource
     , FromJSON (Product resource), ToJSON (Product resource)
     , FromJSON (Preview resource), ToJSON (Preview resource)
@@ -601,7 +617,9 @@ handleUpdateResource self Permissions { canUpdateResource } callbacks = respondi
 handleDeleteResource
   :: forall resource. 
      ( Typeable resource
-     , IsResource resource, ToJSON (Resource resource), FromJSON (Resource resource) 
+     , Identifiable Resource resource
+     , Identifiable Preview resource
+     , ToJSON (Resource resource), FromJSON (Resource resource) 
      , ToJSON (Product resource), FromJSON (Product resource)
      , ToJSON (Preview resource), FromJSON (Preview resource)
      , Eq (Identifier resource), Hashable (Identifier resource), ToJSON (Identifier resource), FromJSON (Identifier resource)
@@ -619,7 +637,6 @@ handleDeleteResource self Permissions { canDeleteResource } callbacks = respondi
 handleReadProduct
   :: forall resource. 
      ( Typeable resource
-     , IsResource resource
      , ToJSON (Product resource), FromJSON (Product resource)
      , Hashable (Identifier resource), FromJSON (Identifier resource)
      ) => Permissions resource -> Callbacks resource -> RequestHandler (ReadProduct resource)
@@ -639,7 +656,8 @@ handleReadProduct Permissions {..} Callbacks {..} = responding do
 handleReadPreview
   :: forall resource. 
      ( Typeable resource
-     , IsResource resource, ToJSON (Preview resource), FromJSON (Preview resource)
+     , Identifiable Resource resource
+     , ToJSON (Preview resource), FromJSON (Preview resource)
      , Hashable (Identifier resource), FromJSON (Identifier resource)
      ) => Permissions resource -> Callbacks resource -> RequestHandler (ReadPreview resource)
 handleReadPreview Permissions {..} Callbacks {..} = responding do
@@ -658,7 +676,8 @@ handleReadPreview Permissions {..} Callbacks {..} = responding do
 handleReadListing
   :: forall resource. 
      ( Typeable resource
-     , IsResource resource , ToJSON (Preview resource), FromJSON (Preview resource)
+     , Identifiable Preview resource
+     , ToJSON (Preview resource), FromJSON (Preview resource)
      , Eq (Identifier resource), ToJSON (Identifier resource), FromJSON (Identifier resource)
      ) => Permissions resource -> Callbacks resource -> RequestHandler (ReadListing resource)
 handleReadListing Permissions {..} Callbacks {..} = responding do
@@ -683,7 +702,7 @@ data ResourceRoute resource
 
 deriving instance Eq (Identifier resource) => Eq (ResourceRoute resource)
 
-resourceRoutes :: forall resource route. IsResource resource => (ResourceRoute resource -> route) -> Routing route _
+resourceRoutes :: forall resource route. (Typeable resource, Routable resource) => (ResourceRoute resource -> route) -> Routing route _
 resourceRoutes liftResource =
   path (root @resource) do
     let disp = dispatch . liftResource
@@ -712,7 +731,7 @@ resourceRoutes liftResource =
       user <- "username"
       Pure.Conjurer.route (liftResource . ReadProduct user)
 
-resourceLocation :: forall resource. IsResource resource => ResourceRoute resource -> Txt
+resourceLocation :: forall resource. (Typeable resource, Routable resource) => ResourceRoute resource -> Txt
 resourceLocation route = 
   root @resource <> 
     case route of
@@ -722,10 +741,10 @@ resourceLocation route =
       ReadPreview u i          -> "/preview/" <> toTxt u <> "/" <> locate i
       ListPreviews mu          -> "/list" <> maybe "" (\u -> "/" <> toTxt u) mu
 
-ref :: (IsResource resource, HasFeatures a) => ResourceRoute resource -> a -> a
+ref :: (Typeable resource, Routable resource, HasFeatures a) => ResourceRoute resource -> a -> a
 ref = lref . resourceLocation
 
-goto :: IsResource resource => ResourceRoute resource -> IO ()
+goto :: (Typeable resource, Routable resource) => ResourceRoute resource -> IO ()
 goto = Router.goto . resourceLocation
 
 {-
@@ -736,15 +755,17 @@ TODO: refine and improve resourcePage
 
 -}
 
-resourcePage :: forall _role resource. 
-                ( Typeable _role
-                , Typeable resource
-                , IsResource resource, ToJSON (Resource resource), FromJSON (Resource resource)
-                , Form (Resource resource)
-                , Component (Product resource), FromJSON (Product resource)
-                , Component (Preview resource), FromJSON (Preview resource)
-                , ToJSON (Identifier resource), FromJSON (Identifier resource)
-                ) => WebSocket -> ResourceRoute resource -> View
+resourcePage 
+  :: forall _role resource. 
+    ( Typeable _role
+    , Typeable resource
+    , Routable resource
+    , ToJSON (Resource resource), FromJSON (Resource resource)
+    , Form (Resource resource)
+    , Component (Product resource), FromJSON (Product resource)
+    , Component (Preview resource), FromJSON (Preview resource)
+    , ToJSON (Identifier resource), FromJSON (Identifier resource)
+    ) => WebSocket -> ResourceRoute resource -> View
 resourcePage ws (CreateResource un) =
   withToken @_role $ maybe "Not Authorized" $ \(Token (_,_)) -> 
     let onSubmit resource = do
