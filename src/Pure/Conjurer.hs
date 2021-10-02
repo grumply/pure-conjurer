@@ -42,6 +42,24 @@ import Unsafe.Coerce
 type Self  = Username
 type Owner = Username
 
+newtype Slug a = Slug Txt
+  deriving (Eq,Ord,ToJSON,FromJSON,Hashable) via Txt
+type role Slug nominal
+
+instance FromTxt (Slug a) where
+  fromTxt = unsafeCoerce . toSlug
+
+instance ToTxt (Slug a) where
+  toTxt (Slug t) = t
+ 
+-- Idempotent.
+--
+-- prop> \(x :: String) -> toSlug (toTxt (toSlug (toTxt x))) == toSlug (toTxt x)
+-- 
+toSlug :: ToTxt a => a -> Slug a
+toSlug = Slug . Txt.intercalate "-" . Txt.words . Txt.toLower . Txt.map f . Txt.replace "'" "" . toTxt
+    where f c | isAlphaNum c = c | otherwise = ' '
+
 newtype Key a = Key Marker
   deriving stock Generic
   deriving (ToJSON,FromJSON,Eq,Ord,Hashable) via Marker
