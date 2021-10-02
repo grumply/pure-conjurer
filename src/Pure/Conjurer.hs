@@ -65,6 +65,12 @@ toSlug :: ToTxt a => a -> Slug a
 toSlug = Slug . Txt.intercalate "-" . Txt.words . Txt.toLower . Txt.map f . Txt.replace "'" "" . toTxt
     where f c | isAlphaNum c = c | otherwise = ' '
 
+newtype Implicit a = Implicit { implicit :: a }
+  deriving stock (Generic,Eq,Ord)
+  deriving anyclass Default
+instance Field (Implicit a) where
+  field _ _ = Pure.Null
+
 newtype Key a = Key Marker
   deriving stock Generic
   deriving (ToJSON,FromJSON,Eq,Ord,Hashable) via Marker
@@ -74,6 +80,7 @@ data family Identifier resource :: *
 data family Resource resource :: *
 data family Product resource :: *
 data family Preview resource :: *
+data family Builder resource :: *
 
 class Identifiable f resource where
   identify :: f resource -> Identifier resource
@@ -108,6 +115,12 @@ class Typeable resource => Previewable resource where
     let tc = show (typeRepTyCon (typeOf (undefined :: resource)))
     in pure (error $ "Previewable " <> tc <> " => preview :: Resource " <> tc <> " -> Product " <> tc <> " -> IO (Preview " <> tc <> "): Not implemented.")
 
+class Typeable resource => Buildable resource where
+  builder :: (Builder resource -> IO ()) -> View
+  default builder :: Form (Builder resource) => (Builder resource -> IO ()) -> View
+  builder = form
+
+  build :: Builder resource -> IO (Resource resource)
 
 --------------------------------------------------------------------------------
 -- Raw resource - typed storage by UUID (Key). Think S3-like where each bucket
@@ -783,6 +796,7 @@ resourcePage
     ( Typeable _role
     , Typeable resource
     , Routable resource
+    , Buildable resource
     , ToJSON (Resource resource), FromJSON (Resource resource)
     , Form (Resource resource)
     , Component (Product resource), FromJSON (Product resource)
@@ -791,10 +805,11 @@ resourcePage
     ) => WebSocket -> ResourceRoute resource -> View
 resourcePage ws (CreateResource un) =
   withToken @_role $ maybe "Not Authorized" $ \(Token (_,_)) -> 
-    let onSubmit resource = do
+    let onSubmit builder = do
+          resource <- build @resource builder
           mi <- sync (request (resourcePublishingAPI @resource) ws (createResource @resource) (un,resource))
           for_ mi (goto . ReadProduct un)
-    in form onSubmit
+    in builder onSubmit
 
 resourcePage ws (ReadProduct un i) = 
   producing producer (consuming consumer)
