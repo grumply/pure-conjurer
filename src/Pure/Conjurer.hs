@@ -783,9 +783,21 @@ class GPathable f where
   gtoPath :: f a -> Txt
   gfromPath :: Routing x (Maybe (f a))
 
-instance GPathable x => GPathable (M1 D m x) where
+instance GPathable V1 where
+  gtoPath _ = ""
+  gfromPath = pure (Just (error "GPathable V1 => gfromPath: tried to materialize a void type."))
+
+instance GPathable U1 where
+  gtoPath _ = ""
+  gfromPath = pure (Just U1)
+
+instance GPathable x => GPathable (M1 r m x) where
   gtoPath (M1 x) = gtoPath x
   gfromPath = fmap (fmap M1) gfromPath
+
+instance Pathable x => GPathable (K1 r x) where
+  gtoPath (K1 x) = toPath x
+  gfromPath = fmap (fmap K1) fromPath
 
 instance (Typeable a, Typeable b, GPathable a, GPathable b) => GPathable ((:*:) a b) where
   gtoPath (a :*: b) = gtoPath a <> gtoPath b
@@ -810,7 +822,7 @@ class Typeable resource => Readable resource where
 
   toReadRoute :: Read resource -> Txt
   default toReadRoute :: Pathable (Identifier resource) => Read resource -> Txt
-  toReadRoute (Read un i) = root @resource <> "/" <> toTxt un <> "/" <> toPath i
+  toReadRoute (Read un i) = root @resource <> "/" <> toTxt un <> toPath i
 
   toRead :: WebSocket -> Read resource -> View
   default toRead :: (Component (Product resource), ToJSON (Identifier resource), FromJSON (Product resource)) => WebSocket -> Read resource -> View
@@ -837,7 +849,7 @@ class (Typeable resource, Typeable _role, ToJSON (Resource resource), FromJSON (
 
   toCreateRoute :: Create _role resource -> Txt
   default toCreateRoute :: Pathable (CreateContext _role resource) => Create _role resource -> Txt
-  toCreateRoute (Create un cc) = root @resource <> "/new/" <> toTxt un <> "/" <> toPath cc
+  toCreateRoute (Create un cc) = root @resource <> "/new/" <> toTxt un <> toPath cc
 
   createPreprocess :: Create _role resource -> Resource resource -> IO (Resource resource)
   createPreprocess _ = pure
