@@ -942,6 +942,45 @@ class SubresourceCallbacks parent resource where
   onReadSublisting :: Identifier parent -> [Preview resource] -> IO ()
   onReadSublisting = def
 
+addSubresource
+  :: forall parent resource.
+    ( Typeable parent, Typeable resource
+    , SubresourceCallbacks parent resource
+    , ToJSON (SublistingMsg parent resource)
+    , ToJSON (Preview resource), FromJSON (Preview resource)
+    , Hashable (Identifier parent)
+    , ToJSON (Identifier resource), FromJSON (Identifier resource)
+    ) => Identifier parent -> Preview resource -> IO ()
+addSubresource i preview = void do
+  Sorcerer.write (AssociatedListingStream i :: Stream (SublistingMsg parent resource)) 
+    (SublistingMsg (PreviewItemAdded preview) :: SublistingMsg parent resource)
+ 
+updateSubresource
+  :: forall parent resource.
+    ( Typeable parent, Typeable resource
+    , SubresourceCallbacks parent resource
+    , ToJSON (SublistingMsg parent resource)
+    , ToJSON (Preview resource), FromJSON (Preview resource)
+    , Hashable (Identifier parent)
+    , ToJSON (Identifier resource), FromJSON (Identifier resource)
+    ) => Identifier parent -> Preview resource -> IO ()
+updateSubresource i preview = void do
+  Sorcerer.write (AssociatedListingStream i :: Stream (SublistingMsg parent resource)) 
+    (SublistingMsg (PreviewItemUpdated preview) :: SublistingMsg parent resource)
+
+removeSubresource
+  :: forall parent resource.
+    ( Typeable parent, Typeable resource
+    , SubresourceCallbacks parent resource
+    , ToJSON (SublistingMsg parent resource)
+    , ToJSON (Preview resource), FromJSON (Preview resource)
+    , Hashable (Identifier parent)
+    , ToJSON (Identifier resource), FromJSON (Identifier resource)
+    ) => Identifier parent -> Identifier resource -> IO ()
+removeSubresource i r = void do
+  Sorcerer.write (AssociatedListingStream i :: Stream (SublistingMsg parent resource)) 
+    (SublistingMsg (PreviewItemRemoved r) :: SublistingMsg parent resource)
+
 subresourceReadingBackend 
   :: forall parent resource.
     ( Typeable parent, Typeable resource
