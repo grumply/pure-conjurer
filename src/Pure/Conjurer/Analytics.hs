@@ -7,6 +7,7 @@ import Pure.Data.JSON hiding (encode,decode)
 import Pure.Data.Txt
 import Pure.Data.Time
 import Pure.Data.Marker
+import Pure.Elm.Component (Default(..))
 import Pure.Sorcerer as Sorcerer
 import Pure.WebSocket hiding (Nat)
 
