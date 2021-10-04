@@ -143,7 +143,7 @@ instance (Typeable resource, ToJSON (ResourceMsg resource), FromJSON (ResourceMs
     
   stream (ResourceStream un (Key m)) = 
     let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
-    in root ++ "/" ++ show un ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
+    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
 
 instance (Typeable resource, FromJSON (Resource resource), ToJSON (Resource resource)) => Aggregable (ResourceMsg resource) (Resource resource) where
   update (ResourceCreated r) Nothing = Update r
@@ -220,7 +220,7 @@ instance (Typeable resource, ToJSON (ProductMsg resource), FromJSON (ProductMsg 
 
   stream (ProductStream un (Key m)) = 
     let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
-    in root ++ "/" ++ show un ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
+    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
 
 instance (Typeable resource, FromJSON (Product resource), ToJSON (Product resource)) => Aggregable (ProductMsg resource) (Product resource) where
   update (ProductCreated p) Nothing = Update p
@@ -248,7 +248,7 @@ instance (Typeable resource, ToJSON (PreviewMsg resource), FromJSON (PreviewMsg 
 
   stream (PreviewStream un (Key m)) = 
     let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
-    in root ++ "/" ++ show un ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
+    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
 
 instance (Typeable resource, FromJSON (Preview resource), ToJSON (Preview resource)) => Aggregable (PreviewMsg resource) (Preview resource) where
   update (PreviewCreated p) Nothing = Update p
@@ -284,7 +284,7 @@ instance (Typeable a, ToJSON (Preview a), FromJSON (Preview a)) => Source (Listi
 
   stream (UserListingStream un) = 
     let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: a)))
-    in root ++ "/" ++ show un ++ "/listing.stream"
+    in root ++ "/" ++ fromTxt (toTxt un) ++ "/listing.stream"
   
   stream GlobalListingStream =
     let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: a)))
