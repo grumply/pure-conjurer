@@ -24,6 +24,7 @@ library
     , pure-json
     , pure-marker
     , pure-maybe
+    , pure-time
     , pure-txt
     , pure-router
     , pure-sync
@@ -34,6 +35,7 @@ library
 
   exposed-modules:
     Pure.Conjurer
+    Pure.Conjurer.Analytics
     Pure.Conjurer.Form
     Pure.Conjurer.Form.Field
 
@@ -69,3 +71,7 @@ library
     TypeOperators
     InstanceSigs
     ExistentialQuantification
+  
+  if !impl(ghcjs)
+    build-depends:
+      iproute
