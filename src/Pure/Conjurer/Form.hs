@@ -38,6 +38,9 @@ instance (KnownSymbol name, Typeable x, GForm x) => GForm (M1 C (MetaCons name _
           , Button <| OnClick (\_ -> maybe def (f . unsafeCoerce) x) |> [ "Submit" ]
           ]
 
+instance (Typeable x, GForm x) => GForm (M1 C (MetaCons name _fix False) x) where
+  gform f = gform (f . M1)
+
 -- Without the strictness annotations, we end up unsafely observing laziness because of the coercions!
 data FormProductState a b = FormProductState !(forall x. a x) !(forall x. b x) 
 
@@ -51,10 +54,17 @@ instance (Typeable a, Typeable b, GDefault a, GDefault b, GForm a, GForm b) => G
           , gform @b (\r -> f (unsafeCoerce l :*: unsafeCoerce r) >> modify (\(FormProductState l _) -> FormProductState l (unsafeCoerce r)))
           ]
 
-instance (m ~ MetaSel (Just name) _u _s _s', GField (M1 S m x), GDefault (M1 S m x), KnownSymbol name) => GForm (M1 S m x) where
+instance (GField (M1 S (MetaSel (Just name) _u _s _s') x), GDefault (M1 S (MetaSel (Just name) _u _s _s') x), KnownSymbol name) => GForm (M1 S (MetaSel (Just name) _u _s _s') x) where
   gform f = 
     Div <| Class (toTxt (symbolVal @name Proxy)) |>
       [ Label <||> [ txt (symbolVal @name Proxy) ]
-      , gfield f (gdef @(M1 S m x))
+      , gfield f (gdef @(M1 S (MetaSel (Just name) _u _s _s') x))
       ]
+
+instance GForm x => GForm (M1 S (MetaSel Nothing _u _s _s') x) where
+  gform f = gform (f . M1)
+
+instance Form x => GForm (K1 r x) where
+  gform f = form (f . K1)
+
 
