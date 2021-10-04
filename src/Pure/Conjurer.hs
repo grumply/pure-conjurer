@@ -50,6 +50,7 @@ and sub-resource assocations.
 
 All magic starts with cheap tricks; figure out what can generalize all of this 
 nonsense.
+
 -}
 
 type Self  = Username
@@ -199,9 +200,9 @@ withResources f = do
 -- Product
 
 data ProductMsg resource
-  = ProductCreated (Product resource)
-  | ProductUpdated (Product resource)
-  | ProductDeleted
+  = ProductCreated (Key resource) (Product resource)
+  | ProductUpdated (Key resource) (Product resource)
+  | ProductDeleted (Key resource)
   deriving stock Generic
 deriving instance ToJSON (Product resource) => ToJSON (ProductMsg resource)
 deriving instance FromJSON (Product resource) => FromJSON (ProductMsg resource)
@@ -213,19 +214,24 @@ deriving instance Hashable (Identifier resource) => Hashable (Stream (ProductMsg
 deriving instance ToJSON   (Identifier resource) => ToJSON   (Stream (ProductMsg resource))
 deriving instance FromJSON (Identifier resource) => FromJSON (Stream (ProductMsg resource))
 
-instance (Typeable resource, FromJSON (Product resource), ToJSON (Product resource), Hashable (Identifier resource)) => Aggregable (ProductMsg resource) (Product resource) where
-  update (ProductCreated p) Nothing = Update p
-  update (ProductUpdated p) (Just _) = Update p
-  update ProductDeleted (Just _) = Delete
+data KeyedProduct resource = KeyedProduct (Key resource) (Product resource)
+  deriving stock Generic
+deriving instance (ToJSON (Product resource)) => ToJSON (KeyedProduct resource)
+deriving instance (FromJSON (Product resource)) => FromJSON (KeyedProduct resource)
+
+instance (Typeable resource, FromJSON (Product resource), ToJSON (Product resource), Hashable (Identifier resource)) => Aggregable (ProductMsg resource) (KeyedProduct resource) where
+  update (ProductCreated k p) Nothing = Update (KeyedProduct k p)
+  update (ProductUpdated k p) (Just (KeyedProduct k' _)) | k == k' = Update (KeyedProduct k p)
+  update (ProductDeleted k) (Just (KeyedProduct k' _)) | k == k' = Delete
   update _ _ = Ignore
 
 --------------------------------------------------------------------------------
 -- Preview
 
 data PreviewMsg resource
-  = PreviewCreated (Preview resource)
-  | PreviewUpdated (Preview resource)
-  | PreviewDeleted
+  = PreviewCreated (Key resource) (Preview resource)
+  | PreviewUpdated (Key resource) (Preview resource)
+  | PreviewDeleted (Key resource)
   deriving stock Generic
 deriving instance ToJSON (Preview resource) => ToJSON (PreviewMsg resource)
 deriving instance FromJSON (Preview resource) => FromJSON (PreviewMsg resource)
@@ -237,10 +243,15 @@ deriving instance Hashable (Identifier resource) => Hashable (Stream (PreviewMsg
 deriving instance ToJSON   (Identifier resource) => ToJSON   (Stream (PreviewMsg resource))
 deriving instance FromJSON (Identifier resource) => FromJSON (Stream (PreviewMsg resource))
 
-instance (Typeable resource, FromJSON (Preview resource), ToJSON (Preview resource), Hashable (Identifier resource)) => Aggregable (PreviewMsg resource) (Preview resource) where
-  update (PreviewCreated p) Nothing = Update p
-  update (PreviewUpdated p) (Just _) = Update p
-  update PreviewDeleted (Just _) = Delete
+data KeyedPreview resource = KeyedPreview (Key resource) (Preview resource)
+  deriving stock Generic
+deriving instance (ToJSON (Preview resource)) => ToJSON (KeyedPreview resource)
+deriving instance (FromJSON (Preview resource)) => FromJSON (KeyedPreview resource)
+
+instance (Typeable resource, FromJSON (Preview resource), ToJSON (Preview resource), Hashable (Identifier resource)) => Aggregable (PreviewMsg resource) (KeyedPreview resource) where
+  update (PreviewCreated k p) Nothing = Update (KeyedPreview k p)
+  update (PreviewUpdated k p) (Just (KeyedPreview k' _)) | k == k' = Update (KeyedPreview k p)
+  update (PreviewDeleted k) (Just (KeyedPreview k' _)) | k == k' = Delete
   update _ _ = Ignore
 
 --------------------------------------------------------------------------------
@@ -294,8 +305,8 @@ resourceDB
 resourceDB = 
   [ listener @(ResourceMsg resource) @(Resource resource)
   , listener @(IndexMsg resource) @(Index resource)
-  , listener @(ProductMsg resource) @(Product resource)
-  , listener @(PreviewMsg resource) @(Preview resource)
+  , listener @(ProductMsg resource) @(KeyedProduct resource)
+  , listener @(PreviewMsg resource) @(KeyedPreview resource)
   , listener @(ListingMsg resource) @(Listing resource)
   ]
 
@@ -318,21 +329,27 @@ tryCreateResource Callbacks {..} owner key resource0 = do
   -- In the rare (nearly-impossible?) case that this key is already used, trying to re-create a resource
   -- will fail with `Ignored` and this method will return False.
   Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) (ResourceCreated resource) >>= \case
-    Added (_ :: Resource resource) -> do
-      let i = identify resource
-      pro <- produce resource
-      pre <- preview resource pro
-      Sorcerer.write (IndexStream @resource) (ResourceAdded owner key)
-      Sorcerer.write (ProductStream owner i) (ProductCreated pro)
-      Sorcerer.write (PreviewStream owner i) (PreviewCreated pre)
-      ~(Update (Listing (globalListing :: [Preview resource]))) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemAdded pre)
-      ~(Update (Listing (userListing :: [Preview resource]))) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemAdded pre)
-      onCreateResource owner i key resource
-      onCreateProduct owner i pro
-      onCreatePreview owner i pre
-      onUpdateListing Nothing globalListing
-      onUpdateListing (Just owner) userListing
-      pure True
+    Added (new :: Resource resource) -> do
+      let i = identify new
+      pro <- produce new
+      result <- Sorcerer.observe (ProductStream owner i) (ProductCreated key pro)
+      case result of
+        Added (_ :: KeyedProduct resource) -> do
+          pre <- preview new pro
+          Sorcerer.write (PreviewStream owner i) (PreviewCreated key pre)
+          Sorcerer.write (IndexStream @resource) (ResourceAdded owner key)
+          ~(Update (Listing (globalListing :: [Preview resource]))) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemAdded pre)
+          ~(Update (Listing (userListing :: [Preview resource]))) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemAdded pre)
+          onCreateResource owner i key new
+          onCreateProduct owner i pro
+          onCreatePreview owner i pre
+          onUpdateListing Nothing globalListing
+          onUpdateListing (Just owner) userListing
+          pure True
+        _ -> do
+          -- roll back; identifier already in use
+          Sorcerer.write (ResourceStream owner key :: Stream (ResourceMsg resource)) ResourceDeleted
+          pure False
     _ ->
       pure False
 
@@ -350,15 +367,43 @@ tryUpdateResource
 tryUpdateResource Callbacks {..} owner key resource0 = do
   resource <- preprocess resource0
   Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) (ResourceCreated resource) >>= \case
-    Updated _ (_ :: Resource resource) -> do
-      let i = identify resource
-      pro <- produce resource
-      pre <- preview resource pro
-      Sorcerer.write (ProductStream owner i) (ProductUpdated pro)
-      Sorcerer.write (PreviewStream owner i) (PreviewUpdated pre)
+    Updated old new | identify old /= identify new -> do
+      let i = identify new
+      pro <- produce new
+      result <- Sorcerer.observe (ProductStream owner i) (ProductCreated key pro)
+      case result of
+        Added (_ :: KeyedProduct resource) -> do
+          pre <- preview new pro
+          ~(Deleted (KeyedProduct _ oldPro)) <- Sorcerer.observe (ProductStream owner (identify old)) (ProductDeleted key)
+          ~(Deleted (KeyedPreview _ oldPre)) <- Sorcerer.observe (PreviewStream owner (identify old)) (PreviewDeleted key)
+          Sorcerer.write (GlobalListingStream @resource) (PreviewItemRemoved (identify old))
+          Sorcerer.write (UserListingStream @resource owner) (PreviewItemRemoved (identify old))
+          onDeleteResource owner (identify old) old
+          onDeleteProduct owner (identify old) oldPro
+          onDeletePreview owner (identify old) oldPre
+          Sorcerer.write (IndexStream @resource) (ResourceAdded owner key)
+          Sorcerer.write (PreviewStream owner i) (PreviewCreated key pre)
+          ~(Update (Listing (globalListing :: [Preview resource]))) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemAdded pre)
+          ~(Update (Listing (userListing :: [Preview resource]))) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemAdded pre)
+          onCreateResource owner i key new
+          onCreateProduct owner i pro
+          onCreatePreview owner i pre
+          onUpdateListing Nothing globalListing
+          onUpdateListing (Just owner) userListing
+          pure True
+        _ -> do
+          -- roll back; new identifier already in use
+          Sorcerer.write (ResourceStream owner key :: Stream (ResourceMsg resource)) (ResourceUpdated old)
+          pure False
+    Updated _ (new :: Resource resource) -> do
+      let i = identify new
+      pro <- produce new
+      pre <- preview new pro
+      Sorcerer.write (ProductStream owner i) (ProductUpdated key pro)
+      Sorcerer.write (PreviewStream owner i) (PreviewUpdated key pre)
       ~(Update (Listing (globalListing :: [Preview resource]))) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemAdded pre)
       ~(Update (Listing (userListing :: [Preview resource]))) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemAdded pre)
-      onUpdateResource owner i key resource
+      onUpdateResource owner i key new
       onUpdateProduct owner i pro
       onUpdatePreview owner i pre
       onUpdateListing Nothing globalListing
@@ -380,11 +425,11 @@ tryDeleteResource Callbacks {..} owner key =
   Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) ResourceDeleted >>= \case
     Deleted r -> do
       let i = identify r
-      ~(Deleted pre) <- Sorcerer.observe (PreviewStream owner i) PreviewDeleted
-      ~(Deleted pro) <- Sorcerer.observe (ProductStream owner i) ProductDeleted
+      ~(Deleted (KeyedPreview _ pre)) <- Sorcerer.observe (PreviewStream owner i) (PreviewDeleted key)
+      ~(Deleted (KeyedProduct _ pro)) <- Sorcerer.observe (ProductStream owner i) (ProductDeleted key)
       ~(Update (Listing (globalListing :: [Preview resource]))) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemRemoved i)
       ~(Update (Listing (userListing :: [Preview resource]))) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemRemoved i)
-      onDeleteResource owner i key r
+      onDeleteResource owner i r
       onDeletePreview owner i pre
       onDeleteProduct owner i pro
       onUpdateListing Nothing globalListing
@@ -495,7 +540,7 @@ resourceReadingAPI = api msgs reqs
 data Permissions resource = Permissions
   { canCreateResource :: Self -> Owner -> Key resource -> IO Bool
   , canReadResource :: Self -> Owner -> Key resource -> IO Bool 
-  , canUpdateResource :: Self -> Owner -> Key resource -> IO Bool
+  , canUpdateResource :: Self -> Owner -> Key resource -> IO Bool -- Note that this subsumes `canDeleteResource` in cases when an identifier changes on update
   , canDeleteResource :: Self -> Owner -> Key resource -> IO Bool
   , canReadProduct :: Identifier resource -> IO Bool
   , canReadPreview :: Identifier resource -> IO Bool
@@ -503,6 +548,8 @@ data Permissions resource = Permissions
   }
 
 instance Default (Permissions resource) where
+  -- default permissions allows the resource creator to create/read/update/delete
+  -- and allows anyone else to read products, previews and listings of previews.
   def = Permissions
     { canCreateResource = \s o _ -> pure (s == o) 
     , canReadResource = \s o _ -> pure (s == o) 
@@ -517,7 +564,7 @@ data Callbacks resource = Callbacks
   { onCreateResource :: Owner -> Identifier resource -> Key resource -> Resource resource -> IO ()
   , onReadResource :: Owner -> Identifier resource -> Key resource -> Resource resource -> IO ()
   , onUpdateResource :: Owner -> Identifier resource -> Key resource -> Resource resource -> IO ()
-  , onDeleteResource :: Owner -> Identifier resource -> Key resource -> Resource resource -> IO ()
+  , onDeleteResource :: Owner -> Identifier resource -> Resource resource -> IO ()
   , onCreateProduct :: Owner -> Identifier resource -> Product resource -> IO ()
   , onReadProduct :: Owner -> Identifier resource -> Product resource -> IO ()
   , onUpdateProduct :: Owner -> Identifier resource -> Product resource -> IO ()
@@ -531,6 +578,7 @@ data Callbacks resource = Callbacks
   }
 
 instance Default (Callbacks resource) where
+  -- default callbacks simply ignore arguments and return ()
   def = Callbacks
     { onCreateResource = def
     , onReadResource = def
@@ -685,7 +733,7 @@ handleReadProduct Permissions {..} Callbacks {..} = responding do
   can <- liftIO (canReadProduct i)
   if can then do
     Sorcerer.read (ProductStream owner i) >>= \case
-      Just p -> do
+      Just (KeyedProduct _ p) -> do
         liftIO (onReadProduct owner i p)
         reply (Just p)
       _ ->
@@ -705,7 +753,7 @@ handleReadPreview Permissions {..} Callbacks {..} = responding do
   can <- liftIO (canReadPreview i)
   if can then do
     Sorcerer.read (PreviewStream owner i) >>= \case
-      Just p -> do
+      Just (KeyedPreview _ p) -> do
         liftIO (onReadPreview owner i p)
         reply (Just p)
       _ ->
