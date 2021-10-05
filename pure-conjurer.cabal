@@ -36,8 +36,8 @@ library
   exposed-modules:
     Pure.Conjurer
     Pure.Conjurer.Analytics
+    Pure.Conjurer.Field
     Pure.Conjurer.Form
-    Pure.Conjurer.Form.Field
 
   default-language: Haskell2010
 

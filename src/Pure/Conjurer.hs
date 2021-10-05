@@ -10,21 +10,22 @@ TODO: interface hiding via export control
 -}
 
 import Pure.Conjurer.Form
-import Pure.Conjurer.Form.Field
+import Pure.Conjurer.Field
 
 import Pure.Auth (Username,Token(..),withToken)
 import Pure.Sync
 import Pure.Data.JSON hiding (Index,Key)
 import Pure.Data.Marker
 import qualified Pure.Data.Txt as Txt
-import Pure.Elm.Component hiding (key,pattern Delete,Listener,root,pattern Form,List)
+import Pure.Elm.Component hiding (key,pattern Delete,Listener,root,pattern Form,List,Update)
 import qualified Pure.Elm.Component as Pure
 import Pure.Hooks hiding (dispatch)
 import Pure.Maybe
 import Pure.WebSocket as WS hiding (Index,identify)
 import Pure.Router hiding (goto)
 import qualified Pure.Router as Router
-import Pure.Sorcerer as Sorcerer hiding (Read)
+import Pure.Sorcerer as Sorcerer hiding (Read,pattern Update)
+import qualified Pure.Sorcerer as Sorcerer
 
 import Data.Char
 import Data.Typeable
@@ -56,42 +57,21 @@ nonsense.
 type Self  = Username
 type Owner = Username
 
-newtype Slug a = Slug Txt
-  deriving (Eq,Ord,ToJSON,FromJSON,Hashable) via Txt
-type role Slug nominal
-
-instance FromTxt (Slug a) where
-  fromTxt = unsafeCoerce . toSlug
-
-instance ToTxt (Slug a) where
-  toTxt (Slug t) = t
-
-instance Field (Slug a) where
-  field onchange current =
-    Input <| OnInput (withInput onchange) . Value (toTxt current)
-
--- Idempotent.
---
--- prop> \(x :: String) -> toSlug (toTxt (toSlug (toTxt x))) == toSlug (toTxt x)
--- 
-toSlug :: ToTxt a => a -> Slug a
-toSlug = Slug . Txt.intercalate "-" . Txt.words . Txt.toLower . Txt.map f . Txt.replace "'" "" . toTxt
-    where f c | isAlphaNum c = c | otherwise = ' '
-
-newtype Implicit a = Implicit { implicit :: a }
-  deriving stock (Generic,Eq,Ord)
-  deriving anyclass Default
-instance Field (Implicit a) where
-  field _ _ = Pure.Null
-
 newtype Key a = Key Marker
   deriving stock Generic
   deriving (ToJSON,FromJSON,Eq,Ord,Hashable) via Marker
 type role Key nominal
+instance Field (Key a) where
+  field _ _ = Pure.Null
+instance Default (Key a) where
+  {-# NOINLINE def #-}
+  def = Key (unsafePerformIO markIO)
 
 data family Resource resource :: *
 data family Product resource :: *
 data family Preview resource :: *
+
+data KeyedPreview resource = KeyedPreview Username (Key resource) (Preview resource)
 
 class Typeable resource => Preprocessable resource where
   preprocess :: Resource resource -> IO (Maybe (Resource resource))
@@ -142,12 +122,12 @@ instance (Typeable resource, ToJSON (ResourceMsg resource), FromJSON (ResourceMs
     deriving anyclass Hashable
     
   stream (ResourceStream un (Key m)) = 
-    let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
-    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
+    let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
+    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ "/resource.stream"
 
 instance (Typeable resource, FromJSON (Resource resource), ToJSON (Resource resource)) => Aggregable (ResourceMsg resource) (Resource resource) where
-  update (ResourceCreated r) Nothing = Update r
-  update (ResourceUpdated r) (Just _) = Update r
+  update (ResourceCreated r) Nothing = Sorcerer.Update r
+  update (ResourceUpdated r) (Just _) = Sorcerer.Update r
   update ResourceDeleted (Just _) = Delete
   update _ _ = Ignore
 
@@ -174,7 +154,7 @@ instance (Typeable resource, ToJSON (IndexMsg resource), FromJSON (IndexMsg reso
     deriving anyclass (Hashable,ToJSON,FromJSON)
     
   stream IndexStream = 
-    let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
+    let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
     in root ++ "/index.stream"
 
 -- The index is simply the event stream - this is a proxy to materialize that
@@ -219,12 +199,12 @@ instance (Typeable resource, ToJSON (ProductMsg resource), FromJSON (ProductMsg 
     deriving anyclass (Hashable,ToJSON,FromJSON)
 
   stream (ProductStream un (Key m)) = 
-    let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
-    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
+    let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
+    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ "/product.stream"
 
 instance (Typeable resource, FromJSON (Product resource), ToJSON (Product resource)) => Aggregable (ProductMsg resource) (Product resource) where
-  update (ProductCreated p) Nothing = Update p
-  update (ProductUpdated p) (Just _) = Update p
+  update (ProductCreated p) Nothing = Sorcerer.Update p
+  update (ProductUpdated p) (Just _) = Sorcerer.Update p
   update ProductDeleted (Just _) = Delete
   update _ _ = Ignore
 
@@ -247,12 +227,12 @@ instance (Typeable resource, ToJSON (PreviewMsg resource), FromJSON (PreviewMsg 
     deriving anyclass (Hashable,ToJSON,FromJSON)
 
   stream (PreviewStream un (Key m)) = 
-    let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
-    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
+    let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
+    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ "/preview.stream"
 
 instance (Typeable resource, FromJSON (Preview resource), ToJSON (Preview resource)) => Aggregable (PreviewMsg resource) (Preview resource) where
-  update (PreviewCreated p) Nothing = Update p
-  update (PreviewUpdated p) (Just _) = Update p
+  update (PreviewCreated p) Nothing = Sorcerer.Update p
+  update (PreviewUpdated p) (Just _) = Sorcerer.Update p
   update PreviewDeleted (Just _) = Delete
   update _ _ = Ignore
 
@@ -278,23 +258,19 @@ deriving instance (ToJSON (Preview a)) => ToJSON (ListingMsg a)
 deriving instance (FromJSON (Preview a)) => FromJSON (ListingMsg a)
 
 instance (Typeable a, ToJSON (Preview a), FromJSON (Preview a)) => Source (ListingMsg a) where
-  data Stream (ListingMsg a) = GlobalListingStream | UserListingStream Username
+  data Stream (ListingMsg a) = UserListingStream Username
     deriving stock Generic
     deriving anyclass Hashable
 
   stream (UserListingStream un) = 
-    let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: a)))
+    let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: a)))
     in root ++ "/" ++ fromTxt (toTxt un) ++ "/listing.stream"
-  
-  stream GlobalListingStream =
-    let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: a)))
-    in root ++ "/listing.stream"
 
 instance ( Typeable a , ToJSON (Preview a), FromJSON (Preview a)) => Aggregable (ListingMsg a) (Listing a) where
-  update (PreviewItemAdded k p)   Nothing  = Update Listing { listing = [(k,p)] }
-  update (PreviewItemAdded k p)   (Just l) = Update Listing { listing = (k,p) : List.filter (((/=) k) . fst) (listing l) }
-  update (PreviewItemUpdated k p) (Just l) = Update l { listing = fmap (\old -> if fst old == k then (k,p) else old) (listing l) }
-  update (PreviewItemRemoved k)   (Just l) = Update l { listing = List.filter ((/= k) . fst) (listing l) }
+  update (PreviewItemAdded k p)   Nothing  = Sorcerer.Update Listing { listing = [(k,p)] }
+  update (PreviewItemAdded k p)   (Just l) = Sorcerer.Update Listing { listing = (k,p) : List.filter (((/=) k) . fst) (listing l) }
+  update (PreviewItemUpdated k p) (Just l) = Sorcerer.Update l { listing = fmap (\old -> if fst old == k then (k,p) else old) (listing l) }
+  update (PreviewItemRemoved k)   (Just l) = Sorcerer.Update l { listing = List.filter ((/= k) . fst) (listing l) }
   update _ _                               = Ignore
   
   aggregate = "listing.aggregate"
@@ -319,7 +295,7 @@ resourceDB =
 newKey :: IO (Key resource)
 newKey = Key <$> markIO
 
-tryCreateResource 
+tryCreate
   :: forall resource. 
     ( Typeable resource
     , Preprocessable resource, Previewable resource, Producible resource
@@ -327,7 +303,7 @@ tryCreateResource
     , ToJSON (Product resource), FromJSON (Product resource)
     , ToJSON (Preview resource), FromJSON (Preview resource)
     ) => Callbacks resource -> Owner -> Key resource -> Resource resource -> IO Bool
-tryCreateResource Callbacks {..} owner key resource0 = do
+tryCreate Callbacks {..} owner key resource0 = do
   mresource <- preprocess resource0
   case mresource of
     Nothing -> pure False
@@ -341,18 +317,13 @@ tryCreateResource Callbacks {..} owner key resource0 = do
           Sorcerer.write (ProductStream owner key) (ProductCreated pro)
           Sorcerer.write (PreviewStream owner key) (PreviewCreated pre)
           Sorcerer.write (IndexStream @resource) (ResourceAdded owner key)
-          ~(Update (Listing (globalListing :: [(Key resource,Preview resource)]))) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemAdded key pre)
-          ~(Update (Listing (userListing :: [(Key resource,Preview resource)]))) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemAdded key pre)
-          onCreateResource owner key new
-          onCreateProduct owner key pro
-          onCreatePreview owner key pre
-          onUpdateListing Nothing globalListing
-          onUpdateListing (Just owner) userListing
+          ~(Sorcerer.Update (Listing (userListing :: [(Key resource,Preview resource)]))) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemAdded key pre)
+          onCreate owner key new pro pre
           pure True
         _ ->
           pure False
 
-tryUpdateResource 
+tryUpdate 
   :: forall resource. 
     ( Typeable resource
     , Preprocessable resource, Previewable resource, Producible resource
@@ -360,47 +331,37 @@ tryUpdateResource
     , ToJSON (Product resource), FromJSON (Product resource)
     , ToJSON (Preview resource), FromJSON (Preview resource)
     ) => Callbacks resource -> Owner -> Key resource -> Resource resource -> IO Bool
-tryUpdateResource Callbacks {..} owner key resource0 = do
+tryUpdate Callbacks {..} owner key resource0 = do
   mresource <- preprocess resource0
   case mresource of
     Nothing -> pure False
     Just resource -> do
-      Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) (ResourceCreated resource) >>= \case
+      Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) (ResourceUpdated resource) >>= \case
         Updated _ (new :: Resource resource) -> do
           pro <- produce new
           pre <- preview new pro
           Sorcerer.write (ProductStream owner key) (ProductUpdated pro)
           Sorcerer.write (PreviewStream owner key) (PreviewUpdated pre)
-          ~(Update (Listing (globalListing :: [(Key resource,Preview resource)]))) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemAdded key pre)
-          ~(Update (Listing (userListing :: [(Key resource,Preview resource)]))) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemAdded key pre)
-          onUpdateResource owner key new
-          onUpdateProduct owner key pro
-          onUpdatePreview owner key pre
-          onUpdateListing Nothing globalListing
-          onUpdateListing (Just owner) userListing
+          ~(Sorcerer.Update (Listing (userListing :: [(Key resource,Preview resource)]))) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemAdded key pre)
+          onUpdate owner key new pro pre
           pure True
         _ ->
           pure False
 
-tryDeleteResource 
+tryDelete 
   :: forall resource. 
     ( Typeable resource
     , ToJSON (Resource resource), FromJSON (Resource resource)
     , ToJSON (Product resource), FromJSON (Product resource)
     , ToJSON (Preview resource), FromJSON (Preview resource)
     ) => Callbacks resource -> Owner -> Key resource -> IO Bool
-tryDeleteResource Callbacks {..} owner key =
+tryDelete Callbacks {..} owner key =
   Sorcerer.observe (ResourceStream owner key :: Stream (ResourceMsg resource)) ResourceDeleted >>= \case
     Deleted r -> do
       ~(Deleted pre) <- Sorcerer.observe (PreviewStream owner key) PreviewDeleted
       ~(Deleted pro) <- Sorcerer.observe (ProductStream owner key) ProductDeleted
-      ~(Update (Listing (globalListing :: [(Key resource,Preview resource)]))) <- Sorcerer.transact (GlobalListingStream @resource) (PreviewItemRemoved key)
-      ~(Update (Listing (userListing :: [(Key resource,Preview resource)]))) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemRemoved key)
-      onDeleteResource owner key r
-      onDeletePreview owner key pre
-      onDeleteProduct owner key pro
-      onUpdateListing Nothing globalListing
-      onUpdateListing (Just owner) userListing
+      ~(Sorcerer.Update (Listing (userListing :: [(Key resource,Preview resource)]))) <- Sorcerer.transact (UserListingStream @resource owner) (PreviewItemRemoved key)
+      onDelete owner key r pro pre
       pure True
     _ -> do
       pure False
@@ -466,7 +427,7 @@ readPreview = Proxy
 data ReadListing resource
 instance Identify (ReadListing resource)
 instance (Typeable resource) => Request (ReadListing resource) where
-  type Req (ReadListing resource) = (Int,Maybe Username)
+  type Req (ReadListing resource) = (Int,Username)
   type Rsp (ReadListing resource) = Maybe [(Key resource,Preview resource)]
 
 readListing :: Proxy (ReadListing resource)
@@ -505,62 +466,40 @@ resourceReadingAPI = api msgs reqs
        <:> WS.none
 
 data Permissions resource = Permissions
-  { canCreateResource :: Self -> Owner -> Key resource -> IO Bool
-  , canReadResource   :: Self -> Owner -> Key resource -> IO Bool
-  , canUpdateResource :: Self -> Owner -> Key resource -> IO Bool -- Note that this subsumes `canDeleteResource` in cases when an identifier changes on update
-  , canDeleteResource :: Self -> Owner -> Key resource -> IO Bool
-  , canReadProduct    :: Key resource -> IO Bool
-  , canReadPreview    :: Key resource -> IO Bool
-  , canReadListing    :: Maybe Owner -> IO Bool
+  { canCreate :: Self -> Owner -> IO Bool
+  , canUpdate :: Self -> Owner -> Key resource -> IO Bool -- Note that this subsumes `canDeleteResource` in cases when an identifier changes on update
+  , canDelete :: Self -> Owner -> Key resource -> IO Bool
+  , canRead   :: Owner -> Key resource -> IO Bool
+  , canList   :: Owner -> IO Bool
   }
 
 instance Default (Permissions resource) where
   -- default permissions allows the resource creator to create/read/update/delete
   -- and allows anyone else to read products, previews and listings of previews.
   def = Permissions
-    { canCreateResource = \s o _ -> pure (s == o)
-    , canReadResource   = \s o _ -> pure (s == o)
-    , canUpdateResource = \s o _ -> pure (s == o)
-    , canDeleteResource = \s o _ -> pure (s == o)
-    , canReadProduct    = \_ -> pure True
-    , canReadPreview    = \_ -> pure True
-    , canReadListing    = \_ -> pure True
+    { canCreate = \s o   -> pure (s == o)
+    , canUpdate = \s o _ -> pure (s == o)
+    , canDelete = \s o _ -> pure (s == o)
+    , canRead   = \_ _   -> pure True
+    , canList   = \_     -> pure True
     }
 
 data Callbacks resource = Callbacks
-  { onCreateResource :: Owner -> Key resource -> Resource resource -> IO ()
-  , onReadResource   :: Owner -> Key resource -> Resource resource -> IO ()
-  , onUpdateResource :: Owner -> Key resource -> Resource resource -> IO ()
-  , onDeleteResource :: Owner -> Key resource -> Resource resource -> IO ()
-  , onCreateProduct  :: Owner -> Key resource -> Product resource -> IO ()
-  , onReadProduct    :: Owner -> Key resource -> Product resource -> IO ()
-  , onUpdateProduct  :: Owner -> Key resource -> Product resource -> IO ()
-  , onDeleteProduct  :: Owner -> Key resource -> Product resource -> IO ()
-  , onCreatePreview  :: Owner -> Key resource -> Preview resource -> IO ()
-  , onReadPreview    :: Owner -> Key resource -> Preview resource -> IO ()
-  , onUpdatePreview  :: Owner -> Key resource -> Preview resource -> IO ()
-  , onDeletePreview  :: Owner -> Key resource -> Preview resource -> IO ()
-  , onReadListing    :: Maybe Owner -> [(Key resource,Preview resource)] -> IO ()
-  , onUpdateListing  :: Maybe Owner -> [(Key resource,Preview resource)] -> IO ()
+  { onCreate :: Owner -> Key resource -> Resource resource -> Product resource -> Preview resource -> IO ()
+  , onUpdate :: Owner -> Key resource -> Resource resource -> Product resource -> Preview resource -> IO ()
+  , onDelete :: Owner -> Key resource -> Resource resource -> Product resource -> Preview resource -> IO ()
+  , onRead   :: Owner -> Key resource -> Product resource  -> IO ()
+  , onList   :: Owner -> [(Key resource,Preview resource)] -> IO ()
   }
 
 instance Default (Callbacks resource) where
   -- default callbacks simply ignore arguments and return ()
   def = Callbacks
-    { onCreateResource = def
-    , onReadResource   = def
-    , onUpdateResource = def
-    , onDeleteResource = def
-    , onCreateProduct  = def
-    , onReadProduct    = def
-    , onUpdateProduct  = def
-    , onDeleteProduct  = def
-    , onCreatePreview  = def
-    , onReadPreview    = def
-    , onUpdatePreview  = def
-    , onDeletePreview  = def
-    , onReadListing    = def
-    , onUpdateListing  = def
+    { onCreate = def
+    , onUpdate = def
+    , onDelete = def
+    , onRead   = def
+    , onList   = def
     }
 
 resourcePublishingBackend :: 
@@ -605,10 +544,10 @@ handleCreateResource
 handleCreateResource self Permissions {..} callbacks = responding do
   (owner :: Owner,resource :: Resource resource) <- acquire
   response <- liftIO do
-    key <- newKey
-    can <- canCreateResource self owner key
-    if can then
-      tryCreateResource callbacks owner key resource >>= \case
+    can <- canCreate self owner
+    if can then do
+      key <- newKey
+      tryCreate callbacks owner key resource >>= \case
         True -> pure (Just key)
         _    -> pure Nothing
     else
@@ -622,16 +561,15 @@ handleReadResource
     ) => Self -> Permissions resource -> Callbacks resource -> RequestHandler (ReadResource resource)
 handleReadResource self Permissions {..} Callbacks {..} = responding do
   (owner :: Owner,k :: Key resource) <- acquire
-  can <- liftIO (canReadResource self owner k)
-  if can then do
-    Sorcerer.read (ResourceStream owner k :: Stream (ResourceMsg resource)) >>= \case
-      Just r -> do
-        liftIO (onReadResource owner k r)
-        reply (Just r)
-      _ -> do
-        reply Nothing
-  else
-    reply Nothing
+  can <- liftIO (canRead owner k)
+  response <- 
+    if can then do
+      Sorcerer.read (ResourceStream owner k :: Stream (ResourceMsg resource)) >>= \case
+        Just r -> pure (Just r)
+        _      -> pure Nothing
+    else
+      pure Nothing
+  reply response
 
 handleUpdateResource
   :: forall resource. 
@@ -644,9 +582,9 @@ handleUpdateResource
 handleUpdateResource self Permissions {..} callbacks = responding do
   (owner :: Owner,key :: Key resource,resource :: Resource resource) <- acquire
   response <- liftIO do
-    can <- canUpdateResource self owner key
+    can <- canUpdate self owner key
     if can then
-      Just <$> tryUpdateResource callbacks owner key resource
+      Just <$> tryUpdate callbacks owner key resource
     else
       pure Nothing
   reply response
@@ -661,9 +599,9 @@ handleDeleteResource
 handleDeleteResource self Permissions {..} callbacks = responding do
   (owner :: Owner,key :: Key resource) <- acquire
   response <- liftIO do
-    can <- canDeleteResource self owner key
+    can <- canDelete self owner key
     if can then
-      Just <$> tryDeleteResource callbacks owner key    
+      Just <$> tryDelete callbacks owner key    
     else do
       pure Nothing
   reply response
@@ -675,16 +613,18 @@ handleReadProduct
     ) => Permissions resource -> Callbacks resource -> RequestHandler (ReadProduct resource)
 handleReadProduct Permissions {..} Callbacks {..} = responding do
   (owner :: Owner,i) <- acquire
-  can <- liftIO (canReadProduct i)
-  if can then do
-    Sorcerer.read (ProductStream owner i) >>= \case
-      Just p -> do
-        liftIO (onReadProduct owner i p)
-        reply (Just p)
-      _ ->
-        reply Nothing
-  else
-    reply Nothing
+  can <- liftIO (canRead owner i)
+  response <-
+    if can then do
+      Sorcerer.read (ProductStream owner i) >>= \case
+        Just p -> do
+          liftIO (onRead owner i p)
+          pure (Just p)
+        _ ->
+          pure Nothing
+    else
+      pure Nothing
+  reply response
 
 handleReadPreview
   :: forall resource. 
@@ -693,16 +633,15 @@ handleReadPreview
     ) => Permissions resource -> Callbacks resource -> RequestHandler (ReadPreview resource)
 handleReadPreview Permissions {..} Callbacks {..} = responding do
   (owner :: Owner,i) <- acquire
-  can <- liftIO (canReadPreview i)
-  if can then do
-    Sorcerer.read (PreviewStream owner i) >>= \case
-      Just p -> do
-        liftIO (onReadPreview owner i p)
-        reply (Just p)
-      _ ->
-        reply Nothing
-  else
-    reply Nothing
+  can <- liftIO (canRead owner i)
+  response <-
+    if can then do
+      Sorcerer.read (PreviewStream owner i) >>= \case
+        Just p -> pure (Just p)
+        _      -> pure Nothing
+    else
+      pure Nothing
+  reply response
 
 handleReadListing
   :: forall resource. 
@@ -710,17 +649,19 @@ handleReadListing
     , ToJSON (Preview resource), FromJSON (Preview resource)
     ) => Permissions resource -> Callbacks resource -> RequestHandler (ReadListing resource)
 handleReadListing Permissions {..} Callbacks {..} = responding do
-  (owner :: Maybe Owner) <- acquire
-  can <- liftIO (canReadListing owner)
-  if can then do
-    Sorcerer.read (maybe (GlobalListingStream @resource) (\o -> UserListingStream @resource o) owner) >>= \case
-      Just l@(Listing ps) -> do
-        liftIO (onReadListing owner ps)
-        reply (Just ps)
-      _ ->
-        reply Nothing
-  else
-    reply Nothing
+  (owner :: Owner) <- acquire
+  can <- liftIO (canList owner)
+  response <-
+    if can then do
+      Sorcerer.read (UserListingStream @resource owner) >>= \case
+        Just l@(Listing ps) -> do
+          liftIO (onList owner ps)
+          pure (Just ps)
+        _  -> 
+          pure Nothing
+    else
+      pure Nothing
+  reply response
 
 root :: forall resource. Typeable resource => Txt
 root = "/" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: resource)))))
@@ -734,17 +675,17 @@ class Pathable a where
   default fromPath :: (Generic a, GPathable (Rep a)) => Routing x (Maybe a)
   fromPath = fmap (fmap (G.to :: Rep a x -> a)) gfromPath
 
-instance Pathable (Key a) where
-  toPath (Key k) = "/" <> encodeBase62 k
-  fromPath = path' "/:key" (fmap (Key . decodeBase62) "key")
+instance Pathable Marker where
+  toPath m = toPath (encodeBase62 m)
+  fromPath = fmap (fmap decodeBase62) fromPath
 
 instance Pathable Txt where
   toPath = ("/" <>)
   fromPath = path' "/:txt" "txt"
 
-instance Pathable (Slug a) where
-  toPath = toPath . toTxt
-  fromPath = fmap (fmap fromTxt) fromPath
+instance Pathable (Key a) where
+  toPath (Key m) = toPath m
+  fromPath = fmap (fmap Key) fromPath
 
 instance Pathable () where
   toPath _ = ""
@@ -786,7 +727,7 @@ class Typeable resource => Readable resource where
       path (root @resource) do
         path "/:username" do
           un <- "username"
-          mi <- fromPath @(Key resource)
+          mi <- fromPath
           case mi of
             Nothing -> continue
             Just i -> dispatch (f (Read un i))
@@ -805,7 +746,6 @@ class Typeable resource => Readable resource where
 data Create _role resource = Create Username
 class (Typeable resource, Typeable _role, ToJSON (Resource resource)) => Creatable _role resource where
   createRoute :: (Create _role resource -> rt) -> Routing rt ()
-  default createRoute :: (Create _role resource -> rt) -> Routing rt ()
   createRoute f =
     void do
       path (root @resource) do
@@ -814,11 +754,10 @@ class (Typeable resource, Typeable _role, ToJSON (Resource resource)) => Creatab
           dispatch (f (Create un))
 
   toCreateRoute :: Create _role resource -> Txt
-  default toCreateRoute :: Create _role resource -> Txt
   toCreateRoute (Create un) = root @resource <> "/new/" <> toTxt un
 
   toCreate :: WebSocket -> Create _role resource -> View
-  default toCreate :: (Readable resource, Form (Resource resource)) => WebSocket -> Create _role resource -> View
+  default toCreate :: (Readable resource, Default (Resource resource), Form (Resource resource)) => WebSocket -> Create _role resource -> View
   toCreate ws c@(Create un) =
     withToken @_role $ maybe "Not Authorized" $ \(Token (_,_)) -> 
       let 
@@ -826,31 +765,60 @@ class (Typeable resource, Typeable _role, ToJSON (Resource resource)) => Creatab
           mi <- sync (request (resourcePublishingAPI @resource) ws (createResource @resource) (un,resource))
           for_ mi (Router.goto . toReadRoute . Read un)
       in 
-        form onSubmit
+        form onSubmit def
 
-data List resource = List (Maybe Username)
+data Update _role resource = Update Username (Key resource)
+class (Typeable _role, Typeable resource, ToJSON (Resource resource), FromJSON (Resource resource)) => Updatable _role resource where
+  updateRoute :: (Update _role resource -> rt) -> Routing rt ()
+  updateRoute f =
+    void do
+      path (root @resource) do
+        path "/update/:username" do
+          un <- "username"
+          mkey <- fromPath
+          case mkey of
+            Just key -> dispatch (f (Update un key))
+            Nothing  -> continue
+
+  toUpdateRoute :: Update _role resource -> Txt
+  toUpdateRoute (Update un key) = root @resource <> "/update/" <> toTxt un <> toPath key 
+
+  toUpdate :: WebSocket -> Update _role resource -> View
+  default toUpdate :: (Readable resource, Form (Resource resource)) => WebSocket -> Update _role resource -> View
+  toUpdate ws (Update un key) =
+    withToken @_role $ maybe "Not Authorized" $ \(Token (_,_)) ->
+      producing producer (consuming consumer)
+    where
+      producer = sync (request (resourcePublishingAPI @resource) ws (readResource @resource) (un,key))
+      consumer = maybe "Not Found" (form onSubmit) 
+
+      onSubmit resource = do
+        did <- sync (request (resourcePublishingAPI @resource) ws (updateResource @resource) (un,key,resource))
+        case did of
+          Just True -> Router.goto (toReadRoute (Read un key))
+          _         -> pure ()
+
+data List resource = List Username
 class (Typeable resource) => Listable resource where
   listRoute :: (List resource -> rt) -> Routing rt ()
   default listRoute :: (List resource -> rt) -> Routing rt ()
   listRoute f =
     void do
       path (root @resource) do
-        path "/list" do
-          path "/:username" do
-            un <- "username"
-            dispatch (f (List (Just un)))
-          dispatch (f (List Nothing))
+        path "/list/:username" do
+          un <- "username"
+          dispatch (f (List un))
 
   toListRoute :: List resource -> Txt
-  toListRoute (List mun) = root @resource <> "/list" <> maybe "" (\un -> "/" <> toTxt un) mun
+  toListRoute (List un) = root @resource <> "/list/" <> toTxt un
 
   toList :: WebSocket -> List resource -> View
-  default toList :: (Component (Key resource,Preview resource), FromJSON (Preview resource)) => WebSocket -> List resource -> View
-  toList ws (List mun) =
+  default toList :: (Component (KeyedPreview resource), FromJSON (Preview resource)) => WebSocket -> List resource -> View
+  toList ws (List un) =
      producing producer (consuming (maybe "Not Found" consumer))
     where
-      producer = sync (request (resourceReadingAPI @resource) ws (readListing @resource) mun)
-      consumer ps = Ul <||> [ Li <||> [ run p ] | p <- ps ]
+      producer = sync (request (resourceReadingAPI @resource) ws (readListing @resource) un)
+      consumer ps = Ul <||> [ Li <||> [ run (KeyedPreview un k p) ] | (k,p) <- ps ]
 
 --------------------------------------------------------------------------------
 -- Subresources
@@ -867,27 +835,27 @@ deriving instance (ToJSON (ListingMsg a)) => ToJSON (SublistingMsg parent a)
 deriving instance (FromJSON (ListingMsg a)) => FromJSON (SublistingMsg parent a)
 
 instance ( Typeable parent, Typeable a , ToJSON (Preview a), FromJSON (Preview a)) => Source (SublistingMsg parent a) where
-  data Stream (SublistingMsg parent a) = AssociatedListingStream (Key parent)
+  data Stream (SublistingMsg parent a) = AssociatedListingStream Owner (Key parent)
     deriving stock Generic
     deriving anyclass Hashable
 
-  stream (AssociatedListingStream (Key m)) =
-    let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: a)))
-    in root ++ "/subresources/" ++ fromTxt (encodeBase62 m) ++ ".stream"
+  stream (AssociatedListingStream un (Key m)) =
+    let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: parent)))
+    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ show (typeRepTyCon (typeOf (undefined :: a))) ++ "/" ++ fromTxt (encodeBase62 m) ++ "/sublisting.stream"
 
 instance ( Typeable parent, Typeable a , ToJSON (Preview a), FromJSON (Preview a)) => Aggregable (SublistingMsg parent a) (Sublisting parent a) where
-  update (SublistingMsg (PreviewItemAdded k p))   Nothing  = Update Sublisting { sublisting = [(k,p)] }
-  update (SublistingMsg (PreviewItemAdded k p))   (Just l) = Update Sublisting { sublisting = (k,p) : List.filter ((/= k) . fst) (sublisting l) }
-  update (SublistingMsg (PreviewItemUpdated k p)) (Just l) = Update l { sublisting = fmap (\old -> if fst old == k then (k,p) else old) (sublisting l) }
-  update (SublistingMsg (PreviewItemRemoved k))   (Just l) = Update l { sublisting = List.filter ((/= k) . fst) (sublisting l) }
-  update _ _                                             = Ignore
+  update (SublistingMsg (PreviewItemAdded k p))   Nothing  = Sorcerer.Update Sublisting { sublisting = [(k,p)] }
+  update (SublistingMsg (PreviewItemAdded k p))   (Just l) = Sorcerer.Update Sublisting { sublisting = (k,p) : List.filter ((/= k) . fst) (sublisting l) }
+  update (SublistingMsg (PreviewItemUpdated k p)) (Just l) = Sorcerer.Update l { sublisting = fmap (\old -> if fst old == k then (k,p) else old) (sublisting l) }
+  update (SublistingMsg (PreviewItemRemoved k))   (Just l) = Sorcerer.Update l { sublisting = List.filter ((/= k) . fst) (sublisting l) }
+  update _ _                                               = Ignore
   
   aggregate = "sublisting.aggregate"
 
 data ReadSublisting parent resource
 instance Identify (ReadSublisting parent resource)
 instance (Typeable parent, Typeable resource) => Request (ReadSublisting parent resource) where
-  type Req (ReadSublisting parent resource) = (Int,Key parent)
+  type Req (ReadSublisting parent resource) = (Int,(Username,Key parent))
   type Rsp (ReadSublisting parent resource) = Maybe [(Key resource,Preview resource)]
 
 readSublisting :: Proxy (ReadSublisting parent resource)
@@ -904,32 +872,14 @@ subresourceReadingAPI = api msgs reqs
     reqs = readSublisting @parent @resource
        <:> WS.none
 
-data SubresourcePermissions parent resource = SubresourcePermissions
-  { canReadSublisting :: Key parent -> IO Bool
-  }
-
-instance Default (SubresourcePermissions parent resource) where
-  def = SubresourcePermissions
-    { canReadSublisting = \_ -> pure True
-    }
-
-data SubresourceCallbacks parent resource = SubresourceCallbacks
-  { onReadSublisting :: Key parent -> [(Key resource,Preview resource)] -> IO ()
-  }
-
-instance Default (SubresourceCallbacks parent resource) where
-  def = SubresourceCallbacks
-    { onReadSublisting = def
-    }
-
 addSubresource
   :: forall parent resource.
     ( Typeable parent, Typeable resource
     , ToJSON (SublistingMsg parent resource)
     , ToJSON (Preview resource), FromJSON (Preview resource)
-    ) => Key parent -> Key resource -> Preview resource -> IO ()
-addSubresource parent resource preview = void do
-  Sorcerer.write (AssociatedListingStream parent :: Stream (SublistingMsg parent resource)) 
+    ) => Username -> Key parent -> Key resource -> Preview resource -> IO ()
+addSubresource owner parent resource preview = void do
+  Sorcerer.write (AssociatedListingStream owner parent :: Stream (SublistingMsg parent resource)) 
     (SublistingMsg (PreviewItemAdded resource preview) :: SublistingMsg parent resource)
  
 updateSubresource
@@ -937,9 +887,9 @@ updateSubresource
     ( Typeable parent, Typeable resource
     , ToJSON (SublistingMsg parent resource)
     , ToJSON (Preview resource), FromJSON (Preview resource)
-    ) => Key parent -> Key resource -> Preview resource -> IO ()
-updateSubresource parent resource preview = void do
-  Sorcerer.write (AssociatedListingStream parent :: Stream (SublistingMsg parent resource)) 
+    ) => Username -> Key parent -> Key resource -> Preview resource -> IO ()
+updateSubresource owner parent resource preview = void do
+  Sorcerer.write (AssociatedListingStream owner parent :: Stream (SublistingMsg parent resource)) 
     (SublistingMsg (PreviewItemUpdated resource preview) :: SublistingMsg parent resource)
 
 removeSubresource
@@ -947,16 +897,16 @@ removeSubresource
     ( Typeable parent, Typeable resource
     , ToJSON (SublistingMsg parent resource)
     , ToJSON (Preview resource), FromJSON (Preview resource)
-    ) => Key parent -> Key resource -> IO ()
-removeSubresource parent resource = void do
-  Sorcerer.write (AssociatedListingStream parent :: Stream (SublistingMsg parent resource)) 
+    ) => Username -> Key parent -> Key resource -> IO ()
+removeSubresource owner parent resource = void do
+  Sorcerer.write (AssociatedListingStream owner parent :: Stream (SublistingMsg parent resource)) 
     (SublistingMsg (PreviewItemRemoved resource) :: SublistingMsg parent resource)
 
 subresourceReadingBackend 
   :: forall parent resource.
     ( Typeable parent, Typeable resource
     , ToJSON (Preview resource), FromJSON (Preview resource)
-    ) => SubresourcePermissions parent resource -> SubresourceCallbacks parent resource -> Endpoints '[] (SubresourceReadingAPI parent resource) '[] (SubresourceReadingAPI parent resource)
+    ) => Permissions resource -> Callbacks resource -> Endpoints '[] (SubresourceReadingAPI parent resource) '[] (SubresourceReadingAPI parent resource)
 subresourceReadingBackend ps cs = Endpoints subresourceReadingAPI msgs reqs
   where
     msgs = WS.none
@@ -967,113 +917,194 @@ handleReadSublisting
   :: forall parent resource.
     ( Typeable parent, Typeable resource
     , ToJSON (Preview resource), FromJSON (Preview resource)
-    ) => SubresourcePermissions parent resource -> SubresourceCallbacks parent resource -> RequestHandler (ReadSublisting parent resource)
-handleReadSublisting SubresourcePermissions {..} SubresourceCallbacks {..} = responding do
-  (i :: Key parent) <- acquire
-  can <- liftIO (canReadSublisting i)
-  if can then do
-    Sorcerer.read ((AssociatedListingStream i) :: Stream (SublistingMsg parent resource)) >>= \case
-      Just (l@(Sublisting ps) :: Sublisting parent resource) -> do
-        liftIO (onReadSublisting i ps)
-        reply (Just ps)
-      _ ->
-        reply Nothing
-  else
-    reply Nothing
+    ) => Permissions resource -> Callbacks resource -> RequestHandler (ReadSublisting parent resource)
+handleReadSublisting Permissions {..} Callbacks {..} = responding do
+  (owner,i :: Key parent) <- acquire
+  can <- liftIO (canList owner)
+  response <-
+    if can then do
+      Sorcerer.read ((AssociatedListingStream owner i) :: Stream (SublistingMsg parent resource)) >>= \case
+        Just (l@(Sublisting ps) :: Sublisting parent resource) -> do
+          liftIO (onList owner ps)
+          pure (Just ps)
+        _ ->
+          pure Nothing
+    else
+      pure Nothing
+  reply response
 
-data Sublist parent resource = Sublist (Key parent)
+subroot :: forall parent resource. (Typeable parent, Typeable resource) => Txt
+subroot = "/" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: parent))))) <> 
+          "-" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: resource)))))
+
+data SubCreate _role parent resource = SubCreate Username (Context _role parent resource)
+class (Typeable parent, Typeable resource, Typeable _role, ToJSON (Resource resource)) => SubCreatable _role parent resource where
+  data Context _role parent resource :: *
+
+  subCreateRoute :: (SubCreate _role parent resource -> rt) -> Routing rt ()
+  default subCreateRoute :: Pathable (Context _role parent resource) => (SubCreate _role parent resource -> rt) -> Routing rt ()
+  subCreateRoute f =
+    void do
+      path (subroot @parent @resource) do
+        path "/new/:username" do
+          un <- "username"
+          mctx <- fromPath @(Context _role parent resource)
+          case mctx of
+            Nothing  -> continue
+            Just ctx -> dispatch (f (SubCreate un ctx))
+
+  build :: Context _role parent resource -> Resource resource -> IO (Resource resource)
+  build _ = pure
+
+  toSubCreateRoute :: SubCreate _role parent resource -> Txt
+  default toSubCreateRoute :: Pathable (Context _role parent resource) => SubCreate _role parent resource -> Txt
+  toSubCreateRoute (SubCreate un ctx) = subroot @parent @resource <> "/new/" <> toTxt un <> toPath ctx
+
+  toSubCreate :: WebSocket -> SubCreate _role parent resource -> View
+  default toSubCreate :: (Readable resource, Form (Resource resource), Default (Resource resource)) => WebSocket -> SubCreate _role parent resource -> View
+  toSubCreate ws c@(SubCreate un ctx) =
+    withToken @_role $ maybe "Not Authorized" $ \(Token (_,_)) -> 
+      let 
+        onSubmit res = do
+          resource <- build ctx res
+          mi <- sync (request (resourcePublishingAPI @resource) ws (createResource @resource) (un,resource))
+          for_ mi (Router.goto . toReadRoute . Read un)
+      in 
+        form onSubmit def
+
+data Sublist parent resource = Sublist Username (Key parent)
 class (Typeable parent, Typeable resource) => Sublistable parent resource where
   sublistRoute :: (Sublist parent resource -> rt) -> Routing rt ()
-  default sublistRoute :: (Sublist parent resource -> rt) -> Routing rt ()
   sublistRoute f =
     void do
-      path (root @resource) do
-        path "/list" do
+      path (subroot @parent @resource) do
+        path "/list/:username" do
+          un <- "username"
           mc <- fromPath @(Key parent)
           case mc of
             Nothing -> continue
-            Just i  -> dispatch (f (Sublist i))
+            Just i  -> dispatch (f (Sublist un i))
             
   toSublistRoute :: Sublist parent resource -> Txt
-  default toSublistRoute :: Sublist parent resource -> Txt
-  toSublistRoute (Sublist i) = root @resource <> "/list" <> toPath i
+  toSublistRoute (Sublist un k) = root @resource <> "/list/" <> toTxt un <> toPath k
 
   toSublist :: WebSocket -> Sublist parent resource -> View
-  default toSublist :: (FromJSON (Preview resource), Component (Key resource,Preview resource)) => WebSocket -> Sublist parent resource -> View
-  toSublist ws (Sublist i) =
+  default toSublist :: (FromJSON (Preview resource), Component (KeyedPreview resource)) => WebSocket -> Sublist parent resource -> View
+  toSublist ws (Sublist un k) =
      producing producer (consuming (maybe "Not Found" consumer))
     where
-      producer = sync (request (subresourceReadingAPI @parent @resource) ws (readSublisting :: Proxy (ReadSublisting parent resource)) i)
-      consumer ps = Ul <||> [ Li <||> [ run p ] | p <- ps ]
+      producer = sync (request (subresourceReadingAPI @parent @resource) ws (readSublisting :: Proxy (ReadSublisting parent resource)) (un,k))
+      consumer ps = Ul <||> [ Li <||> [ run (KeyedPreview un k p) ] | (k,p) <- ps ]
 
 --------------------------------------------------------------------------------
 
 data ResourceRoute _role resource
   = CreateR (Create _role resource)
+  | UpdateR (Update _role resource)
   | ReadR (Read resource)
   | ListR (List resource)
 
-resourcePage :: forall _role resource.  ( Readable resource, Creatable _role resource, Listable resource) 
-             => WebSocket -> ResourceRoute _role resource -> View
+resourcePage 
+  :: forall _role resource.  
+    ( Readable resource, Creatable _role resource, Updatable _role resource, Listable resource
+    ) => WebSocket -> ResourceRoute _role resource -> View
 resourcePage ws = \case
   CreateR c -> toCreate ws c
+  UpdateR r -> toUpdate ws r
   ReadR r   -> toRead ws r
   ListR r   -> toList ws r
 
 resourceRoutes 
   :: forall _role resource route. 
     ( Typeable resource
-    , Readable resource, Creatable _role resource, Listable resource 
+    , Readable resource, Creatable _role resource, Updatable _role resource, Listable resource 
     ) => (ResourceRoute _role resource -> route) -> Routing route ()
 resourceRoutes lift = do
+  listRoute (lift . ListR)
+  updateRoute (lift . UpdateR)
   createRoute (lift . CreateR)
   readRoute (lift . ReadR)
-  listRoute (lift . ListR)
 
 resourceLocation 
   :: forall _role resource. 
     ( Typeable resource
-    , Readable resource, Creatable _role resource, Listable resource
+    , Readable resource, Creatable _role resource, Updatable _role resource, Listable resource
     ) => ResourceRoute _role resource -> Txt
 resourceLocation = \case
   CreateR r -> toCreateRoute r
+  UpdateR r -> toUpdateRoute r
   ReadR r   -> toReadRoute r
   ListR r   -> toListRoute r
 
-ref :: forall _role resource a. (Typeable resource, Readable resource, Creatable _role resource, Listable resource, HasFeatures a) => ResourceRoute _role resource -> a -> a
+ref 
+  :: forall _role resource a. 
+    ( Typeable resource
+    , Readable resource, Creatable _role resource, Updatable _role resource, Listable resource
+    , HasFeatures a
+    ) => ResourceRoute _role resource -> a -> a
 ref = lref . resourceLocation
 
-goto :: forall _role resource. (Typeable resource, Readable resource, Creatable _role resource, Listable resource) => ResourceRoute _role resource -> IO ()
+goto 
+  :: forall _role resource. 
+    ( Typeable resource
+    , Readable resource, Creatable _role resource, Updatable _role resource, Listable resource
+    ) => ResourceRoute _role resource -> IO ()
 goto = Router.goto . resourceLocation
 
 --------------------------------------------------------------------------------
 
-data SubresourceRoute parent resource
-  = SublistR (Sublist parent resource)
+data SubresourceRoute _role parent resource
+  = SubCreateR (SubCreate _role parent resource)
+  | SubUpdateR (Update _role resource)
+  | SubReadR (Read resource)
+  | SublistR (Sublist parent resource)
 
-subresourcePage :: forall parent resource. ( Sublistable parent resource )
-                 => WebSocket -> SubresourceRoute parent resource -> View
+subresourcePage 
+  :: forall _role parent resource. 
+    ( Sublistable parent resource
+    , Readable resource
+    , Updatable _role resource
+    , SubCreatable _role parent resource 
+    ) => WebSocket -> SubresourceRoute _role parent resource -> View
 subresourcePage ws = \case
+  SubCreateR r -> toSubCreate ws r
+  SubUpdateR r -> toUpdate ws r
+  SubReadR r -> toRead ws r
   SublistR r -> toSublist ws r
 
 subresourceRoutes
-  :: forall parent resource route.
+  :: forall _role parent resource route.
     ( Typeable parent, Typeable resource 
-    , Sublistable parent resource
-    ) => (SubresourceRoute parent resource -> route) -> Routing route ()
+    , Sublistable parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable resource
+    ) => (SubresourceRoute _role parent resource -> route) -> Routing route ()
 subresourceRoutes lift = do
   sublistRoute (lift . SublistR)
+  updateRoute (lift . SubUpdateR)
+  subCreateRoute (lift . SubCreateR)
+  readRoute (lift . SubReadR)
 
 subresourceLocation
-  :: forall parent resource.
+  :: forall _role parent resource.
     ( Typeable parent, Typeable resource
-    , Sublistable parent resource
-    ) => SubresourceRoute parent resource -> Txt
+    , Sublistable parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable resource
+    ) => SubresourceRoute _role parent resource -> Txt
 subresourceLocation = \case
   SublistR r -> toSublistRoute r
+  SubReadR r -> toReadRoute r
+  SubUpdateR r -> toUpdateRoute r
+  SubCreateR r -> toSubCreateRoute r
 
-subref :: forall parent resource a. (Typeable parent, Typeable resource, Sublistable parent resource, HasFeatures a) => SubresourceRoute parent resource -> a -> a
+subref 
+  :: forall _role parent resource a. 
+    ( Typeable parent, Typeable resource
+    , Sublistable parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable resource
+    , HasFeatures a
+    ) => SubresourceRoute _role parent resource -> a -> a
 subref = lref . subresourceLocation
 
-subgoto :: forall parent resource. (Typeable parent, Typeable resource, Sublistable parent resource) => SubresourceRoute parent resource -> IO ()
+subgoto 
+  :: forall _role parent resource. 
+    ( Typeable parent, Typeable resource
+    , Sublistable parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable resource
+    ) => SubresourceRoute _role parent resource -> IO ()
 subgoto = Router.goto . subresourceLocation 

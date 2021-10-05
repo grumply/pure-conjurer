@@ -1,4 +1,4 @@
-module Pure.Conjurer.Form.Field where
+module Pure.Conjurer.Field where
 
 import Pure.Elm.Component
 import Pure.Data.Txt (Txt)

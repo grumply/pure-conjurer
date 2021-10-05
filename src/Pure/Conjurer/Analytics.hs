@@ -133,10 +133,10 @@ recordSessionEnd sid = do
 --------------------------------------------------------------------------------  
 
 addAnalytics :: Typeable resource => SessionId -> Callbacks resource -> Callbacks resource
-addAnalytics sid cbs = cbs { onReadProduct = analyzeRead }
+addAnalytics sid cbs = cbs { onRead = analyzeRead }
   where
     analyzeRead owner key product = do
       recordRead sid key
-      onReadProduct cbs owner key product
+      onRead cbs owner key product
 
 --------------------------------------------------------------------------------
