@@ -27,6 +27,7 @@ import qualified Pure.Router as Router
 import Pure.Sorcerer as Sorcerer hiding (Read,pattern Update)
 import qualified Pure.Sorcerer as Sorcerer
 
+import Control.Monad
 import Data.Char
 import Data.Typeable
 import Data.Hashable
@@ -66,6 +67,24 @@ instance Field (Key a) where
 instance Default (Key a) where
   {-# NOINLINE def #-}
   def = Key (unsafePerformIO markIO)
+
+newtype Slug x = Slug Txt
+  deriving (Eq,Ord,ToJSON,FromJSON,Hashable) via Txt
+type role Slug nominal
+
+instance ToTxt (Slug x) where
+  toTxt (Slug x) = x
+
+instance FromTxt (Slug x) where
+  fromTxt = toSlug
+
+-- Idempotent.
+--
+-- prop> \(x :: String) -> toSlug (toTxt (toSlug (toTxt x))) == toSlug (toTxt x)
+-- 
+toSlug :: ToTxt a => a -> Slug b
+toSlug = Slug . Txt.intercalate "-" . Txt.words . Txt.toLower . Txt.map f . Txt.replace "'" "" . toTxt
+    where f c | isAlphaNum c = c | otherwise = ' 
 
 data family Resource resource :: *
 data family Product resource :: *
@@ -122,8 +141,8 @@ instance (Typeable resource, ToJSON (ResourceMsg resource), FromJSON (ResourceMs
     deriving anyclass Hashable
     
   stream (ResourceStream un (Key m)) = 
-    let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
-    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ "/resource.stream"
+    let root = "conjurer/resources/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
+    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
 
 instance (Typeable resource, FromJSON (Resource resource), ToJSON (Resource resource)) => Aggregable (ResourceMsg resource) (Resource resource) where
   update (ResourceCreated r) Nothing = Sorcerer.Update r
@@ -132,6 +151,51 @@ instance (Typeable resource, FromJSON (Resource resource), ToJSON (Resource reso
   update _ _ = Ignore
 
   aggregate = "resource.aggregate"
+
+--------------------------------------------------------------------------------
+
+data MappingMsg key value 
+  = CreateMapping Username (Key value)
+  | UpdateMapping Username (Key value)
+  | DeleteMapping 
+  deriving stock Generic
+  deriving anyclass (ToJSON,FromJSON)
+type role MappingMsg nominal nominal
+
+instance (Typeable key, Typeable value, Hashable key) => Source (MappingMsg key value) where
+  data Stream (MappingMsg key value) = MappingStream key
+    deriving stock Generic
+    deriving anyclass Hashable
+
+  stream (MappingStream k) =
+    let root = "conjurer/mappings/" ++ show (typeRepTyCon (typeOf (undefined :: key)))
+    in root ++ "/" ++ show (typeRepTyCon (typeOf (undefined :: value))) ++ "/" ++ show (abs (hash k)) ++ ".stream"
+
+data Mapping key value = Mapping Username (Key value)
+  deriving stock Generic
+  deriving anyclass (ToJSON,FromJSON)
+type role Mapping nominal nominal
+
+instance (Typeable key, Typeable value, Hashable key) => Aggregable (MappingMsg key value) (Mapping key value) where
+  update (CreateMapping un kv) Nothing = Sorcerer.Update (Mapping un kv)
+  update (UpdateMapping un kv) (Just _) = Sorcerer.Update (Mapping un kv)
+  update DeleteMapping (Just _) = Delete
+  update _ _ = Ignore
+
+class Synonymous a b where
+  lookup :: a -> IO (Maybe b)
+
+instance {-# OVERLAPPING #-} (Typeable a, Typeable b, Hashable a, ToJSON (Resource b), FromJSON (Resource b), Aggregable (MappingMsg a b) (Mapping a b), Aggregable (ResourceMsg b) (Resource b)) => Synonymous a (Resource b) where
+  lookup = tryReadMapping >=> traverse (uncurry tryReadResource) >=> pure . join
+
+instance {-# OVERLAPPING #-} (Typeable a, Typeable b, Hashable a, ToJSON (Preview b), FromJSON (Preview b), Aggregable (MappingMsg a b) (Mapping a b), Aggregable (PreviewMsg b) (Preview b)) => Synonymous a (Preview b) where
+  lookup = tryReadMapping >=> traverse (uncurry tryReadPreview) >=> pure . join
+
+instance {-# OVERLAPPING #-} (Typeable a, Typeable b, Hashable a, ToJSON (Product b), FromJSON (Product b), Aggregable (MappingMsg a b) (Mapping a b), Aggregable (ProductMsg b) (Product b)) => Synonymous a (Product b) where
+  lookup = tryReadMapping >=> traverse (uncurry tryReadProduct) >=> pure . join
+
+instance {-# OVERLAPPABLE #-} (Typeable a, Typeable b, Hashable a, Aggregable (MappingMsg a b) (Mapping a b)) => Synonymous a (Username,Key b) where
+  lookup = tryReadMapping
 
 --------------------------------------------------------------------------------
 -- A log of items added to a bucket. Since objects associated with added keys 
@@ -154,7 +218,7 @@ instance (Typeable resource, ToJSON (IndexMsg resource), FromJSON (IndexMsg reso
     deriving anyclass (Hashable,ToJSON,FromJSON)
     
   stream IndexStream = 
-    let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
+    let root = "conjurer/indexes/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
     in root ++ "/index.stream"
 
 -- The index is simply the event stream - this is a proxy to materialize that
@@ -169,6 +233,8 @@ instance (Typeable resource, ToJSON (IndexMsg resource), FromJSON (IndexMsg reso
 -- See `withResource` for accessing all non-deleted resources of a given type.
 instance Typeable resource => Aggregable (IndexMsg resource) (Index resource) where
   update _ _ = Ignore
+  
+  aggregate = "index.aggregate"
 
 -- Iterate over all live objects of a given type. This is a method by which to 
 -- migrate from one format to another, if done before a server initialization 
@@ -199,8 +265,8 @@ instance (Typeable resource, ToJSON (ProductMsg resource), FromJSON (ProductMsg 
     deriving anyclass (Hashable,ToJSON,FromJSON)
 
   stream (ProductStream un (Key m)) = 
-    let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
-    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ "/product.stream"
+    let root = "conjurer/products/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
+    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
 
 instance (Typeable resource, FromJSON (Product resource), ToJSON (Product resource)) => Aggregable (ProductMsg resource) (Product resource) where
   update (ProductCreated p) Nothing = Sorcerer.Update p
@@ -227,8 +293,8 @@ instance (Typeable resource, ToJSON (PreviewMsg resource), FromJSON (PreviewMsg 
     deriving anyclass (Hashable,ToJSON,FromJSON)
 
   stream (PreviewStream un (Key m)) = 
-    let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
-    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ "/preview.stream"
+    let root = "conjurer/previews/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
+    in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ fromTxt (encodeBase62 m) ++ ".stream"
 
 instance (Typeable resource, FromJSON (Preview resource), ToJSON (Preview resource)) => Aggregable (PreviewMsg resource) (Preview resource) where
   update (PreviewCreated p) Nothing = Sorcerer.Update p
@@ -263,17 +329,22 @@ instance (Typeable a, ToJSON (Preview a), FromJSON (Preview a)) => Source (Listi
     deriving anyclass Hashable
 
   stream (UserListingStream un) = 
-    let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: a)))
+    let root = "conjurer/previews/" ++ show (typeRepTyCon (typeOf (undefined :: a)))
     in root ++ "/" ++ fromTxt (toTxt un) ++ "/listing.stream"
 
-instance ( Typeable a , ToJSON (Preview a), FromJSON (Preview a)) => Aggregable (ListingMsg a) (Listing a) where
-  update (PreviewItemAdded k p)   Nothing  = Sorcerer.Update Listing { listing = [(k,p)] }
-  update (PreviewItemAdded k p)   (Just l) = Sorcerer.Update Listing { listing = (k,p) : List.filter (((/=) k) . fst) (listing l) }
-  update (PreviewItemUpdated k p) (Just l) = Sorcerer.Update l { listing = fmap (\old -> if fst old == k then (k,p) else old) (listing l) }
-  update (PreviewItemRemoved k)   (Just l) = Sorcerer.Update l { listing = List.filter ((/= k) . fst) (listing l) }
-  update _ _                               = Ignore
-  
+-- Overlappable in case the need arises to, for instance, limit the length of a listing.
+instance {-# OVERLAPPABLE #-} ( Typeable a , ToJSON (Preview a), FromJSON (Preview a)) => Aggregable (ListingMsg a) (Listing a) where
+  update = defaultListingUpdate id 
   aggregate = "listing.aggregate"
+
+defaultListingUpdate :: (forall a. [a] -> [a]) -> ListingMsg x -> Maybe (Listing x) -> Maybe (Maybe (Listing x))
+defaultListingUpdate f = update
+  where
+    update (PreviewItemAdded k p)   Nothing  = Sorcerer.Update Listing { listing = [(k,p)] }
+    update (PreviewItemAdded k p)   (Just l) = Sorcerer.Update Listing { listing = f $ (k,p) : List.filter (((/=) k) . fst) (listing l) }
+    update (PreviewItemUpdated k p) (Just l) = Sorcerer.Update l { listing = f $ fmap (\old -> if fst old == k then (k,p) else old) (listing l) }
+    update (PreviewItemRemoved k)   (Just l) = Sorcerer.Update l { listing = List.filter ((/= k) . fst) (listing l) }
+    update _ _                               = Ignore
 
 --------------------------------------------------------------------------------  
 
@@ -292,7 +363,7 @@ resourceDB =
   , listener @(ListingMsg resource) @(Listing resource)
   ]
 
-newKey :: IO (Key resource)
+newKey :: IO (Key b)
 newKey = Key <$> markIO
 
 tryCreate
@@ -365,6 +436,110 @@ tryDelete Callbacks {..} owner key =
       pure True
     _ -> do
       pure False
+
+tryReadResource
+  :: forall resource.
+    ( Typeable resource
+    , ToJSON (Resource resource), FromJSON (Resource resource)
+    ) => Owner -> Key resource -> IO (Maybe (Resource resource))
+tryReadResource owner key = Sorcerer.read (ResourceStream owner key)
+
+tryReadPreview
+  :: forall resource.
+    ( Typeable resource
+    , ToJSON (Preview resource), FromJSON (Preview resource)
+    ) => Owner -> Key resource -> IO (Maybe (Preview resource))
+tryReadPreview owner key = Sorcerer.read (PreviewStream owner key)
+
+tryReadProduct
+  :: forall resource.
+    ( Typeable resource
+    , ToJSON (Product resource), FromJSON (Product resource)
+    ) => Owner -> Key resource -> IO (Maybe (Product resource))
+tryReadProduct owner key = Sorcerer.read (ProductStream owner key)
+
+tryReadListing
+  :: forall resource.
+    ( Typeable resource
+    , ToJSON (Preview resource), FromJSON (Preview resource)
+    ) => Owner -> IO (Maybe [(Key resource,Preview resource)])
+tryReadListing owner =
+  Sorcerer.read (UserListingStream @resource owner) >>= \case
+    Just (Listing ps) -> pure (Just ps)
+    Nothing -> pure Nothing
+
+tryCreateMapping
+  :: forall key value.
+    ( Typeable key, Typeable value
+    , Hashable key
+    ) => key -> Username -> Key value -> IO Bool
+tryCreateMapping key username kvalue =
+  Sorcerer.transact (MappingStream key) (CreateMapping username kvalue) >>= \case
+    Sorcerer.Update (_ :: Mapping key value) -> pure True
+    _ -> pure False
+
+tryUpdateMapping
+  :: forall key value.
+    ( Typeable key, Typeable value
+    , Hashable key
+    ) => key -> Username -> Key value -> IO Bool
+tryUpdateMapping key username kvalue =
+  Sorcerer.transact (MappingStream key) (UpdateMapping username kvalue) >>= \case
+    Sorcerer.Update (_ :: Mapping key value) -> pure True
+    _ -> pure False
+
+tryDeleteMapping
+  :: forall value key.
+    ( Typeable key, Typeable value
+    , Hashable key
+    ) => key -> IO Bool
+tryDeleteMapping key =
+  Sorcerer.transact (MappingStream key :: Stream (MappingMsg key value)) (DeleteMapping :: MappingMsg key value) >>= \case
+    (Delete :: Maybe (Maybe (Mapping key value))) -> pure True
+    _ -> pure False
+
+tryReadMapping
+  :: forall key value.
+    ( Typeable key, Typeable value
+    , Hashable key
+    ) => key -> IO (Maybe (Username,Key value))
+tryReadMapping key =
+  Sorcerer.read (MappingStream key :: Stream (MappingMsg key value)) >>= \case
+    Just (Mapping username kvalue :: Mapping key value) -> pure (Just (username,kvalue))
+    _ -> pure Nothing
+
+tryLookupResource
+  :: forall key value.
+    ( Typeable key, Typeable value
+    , Hashable key
+    , ToJSON (Resource value), FromJSON (Resource value)
+    ) => key -> IO (Maybe (Resource value))
+tryLookupResource key = do
+  tryReadMapping key >>= \case
+    Just (username,kvalue) -> tryReadResource username kvalue
+    _ -> pure Nothing
+
+tryLookupPreview
+  :: forall key value.
+    ( Typeable key, Typeable value
+    , Hashable key
+    , ToJSON (Preview value), FromJSON (Preview value)
+    ) => key -> IO (Maybe (Preview value))
+tryLookupPreview key = do
+  tryReadMapping key >>= \case
+    Just (username,kvalue) -> tryReadPreview username kvalue
+    _ -> pure Nothing
+
+tryLookupProduct
+  :: forall key value.
+    ( Typeable key, Typeable value
+    , Hashable key
+    , ToJSON (Product value), FromJSON (Product value)
+    ) => key -> IO (Maybe (Product value))
+tryLookupProduct key = do
+  tryReadMapping key >>= \case
+    Just (username,kvalue) -> tryReadProduct username kvalue
+    _ -> pure Nothing
 
 --------------------------------------------------------------------------------
 -- Sadly, polymorphic API endpoints can't currently be derived with 
@@ -611,18 +786,18 @@ handleReadProduct
     ( Typeable resource
     , ToJSON (Product resource), FromJSON (Product resource)
     ) => Permissions resource -> Callbacks resource -> RequestHandler (ReadProduct resource)
-handleReadProduct Permissions {..} Callbacks {..} = responding do
-  (owner :: Owner,i) <- acquire
-  can <- liftIO (canRead owner i)
-  response <-
-    if can then do
-      Sorcerer.read (ProductStream owner i) >>= \case
+handleReadProduct Permissions {..} Callbacks { onRead } = responding do
+  (owner :: Owner,key) <- acquire
+  response <- liftIO do
+    can <- canRead owner key
+    if can then 
+      tryReadProduct owner key >>= \case
         Just p -> do
-          liftIO (onRead owner i p)
+          onRead owner key p
           pure (Just p)
         _ ->
           pure Nothing
-    else
+    else 
       pure Nothing
   reply response
 
@@ -632,14 +807,12 @@ handleReadPreview
     , ToJSON (Preview resource), FromJSON (Preview resource)
     ) => Permissions resource -> Callbacks resource -> RequestHandler (ReadPreview resource)
 handleReadPreview Permissions {..} Callbacks {..} = responding do
-  (owner :: Owner,i) <- acquire
-  can <- liftIO (canRead owner i)
-  response <-
-    if can then do
-      Sorcerer.read (PreviewStream owner i) >>= \case
-        Just p -> pure (Just p)
-        _      -> pure Nothing
-    else
+  (owner :: Owner,key) <- acquire
+  response <- liftIO do
+    can <- canRead owner key
+    if can then 
+      tryReadPreview owner key 
+    else 
       pure Nothing
   reply response
 
@@ -650,16 +823,16 @@ handleReadListing
     ) => Permissions resource -> Callbacks resource -> RequestHandler (ReadListing resource)
 handleReadListing Permissions {..} Callbacks {..} = responding do
   (owner :: Owner) <- acquire
-  can <- liftIO (canList owner)
-  response <-
-    if can then do
-      Sorcerer.read (UserListingStream @resource owner) >>= \case
-        Just l@(Listing ps) -> do
-          liftIO (onList owner ps)
+  response <- liftIO do
+    can <- canList owner
+    if can then 
+      tryReadListing owner >>= \case
+        Just ps -> do
+          onList owner ps
           pure (Just ps)
-        _  -> 
+        _ ->
           pure Nothing
-    else
+    else 
       pure Nothing
   reply response
 
@@ -721,7 +894,6 @@ instance (Typeable a, Typeable b, GPathable a, GPathable b) => GPathable ((:*:) 
 data Read resource = Read Username (Key resource)
 class Typeable resource => Readable resource where
   readRoute :: (Read resource -> rt) -> Routing rt ()
-  default readRoute :: (Read resource -> rt) -> Routing rt ()
   readRoute f =
     void do
       path (root @resource) do
@@ -733,7 +905,6 @@ class Typeable resource => Readable resource where
             Just i -> dispatch (f (Read un i))
 
   toReadRoute :: Read resource -> Txt
-  default toReadRoute :: Read resource -> Txt
   toReadRoute (Read un i) = root @resource <> "/" <> toTxt un <> toPath i
 
   toRead :: WebSocket -> Read resource -> View
@@ -801,7 +972,6 @@ class (Typeable _role, Typeable resource, ToJSON (Resource resource), FromJSON (
 data List resource = List Username
 class (Typeable resource) => Listable resource where
   listRoute :: (List resource -> rt) -> Routing rt ()
-  default listRoute :: (List resource -> rt) -> Routing rt ()
   listRoute f =
     void do
       path (root @resource) do
@@ -843,15 +1013,20 @@ instance ( Typeable parent, Typeable a , ToJSON (Preview a), FromJSON (Preview a
     let root = "conjurer/" ++ show (typeRepTyCon (typeOf (undefined :: parent)))
     in root ++ "/" ++ fromTxt (toTxt un) ++ "/" ++ show (typeRepTyCon (typeOf (undefined :: a))) ++ "/" ++ fromTxt (encodeBase62 m) ++ "/sublisting.stream"
 
+-- Overlappable in case the need arises to, for instance, limit the length of a listing.
 instance ( Typeable parent, Typeable a , ToJSON (Preview a), FromJSON (Preview a)) => Aggregable (SublistingMsg parent a) (Sublisting parent a) where
-  update (SublistingMsg (PreviewItemAdded k p))   Nothing  = Sorcerer.Update Sublisting { sublisting = [(k,p)] }
-  update (SublistingMsg (PreviewItemAdded k p))   (Just l) = Sorcerer.Update Sublisting { sublisting = (k,p) : List.filter ((/= k) . fst) (sublisting l) }
-  update (SublistingMsg (PreviewItemUpdated k p)) (Just l) = Sorcerer.Update l { sublisting = fmap (\old -> if fst old == k then (k,p) else old) (sublisting l) }
-  update (SublistingMsg (PreviewItemRemoved k))   (Just l) = Sorcerer.Update l { sublisting = List.filter ((/= k) . fst) (sublisting l) }
-  update _ _                                               = Ignore
-  
+  update = defaultSublistingUpdate id
   aggregate = "sublisting.aggregate"
 
+defaultSublistingUpdate :: (forall a. [a] -> [a]) -> SublistingMsg parent x -> Maybe (Sublisting parent x) -> Maybe (Maybe (Sublisting parent x))
+defaultSublistingUpdate f = update
+  where
+    update (SublistingMsg (PreviewItemAdded k p))   Nothing  = Sorcerer.Update Sublisting { sublisting = [(k,p)] }
+    update (SublistingMsg (PreviewItemAdded k p))   (Just l) = Sorcerer.Update Sublisting { sublisting = f $ (k,p) : List.filter ((/= k) . fst) (sublisting l) }
+    update (SublistingMsg (PreviewItemUpdated k p)) (Just l) = Sorcerer.Update l { sublisting = f $ fmap (\old -> if fst old == k then (k,p) else old) (sublisting l) }
+    update (SublistingMsg (PreviewItemRemoved k))   (Just l) = Sorcerer.Update l { sublisting = List.filter ((/= k) . fst) (sublisting l) }
+    update _ _                                               = Ignore
+  
 data ReadSublisting parent resource
 instance Identify (ReadSublisting parent resource)
 instance (Typeable parent, Typeable resource) => Request (ReadSublisting parent resource) where
