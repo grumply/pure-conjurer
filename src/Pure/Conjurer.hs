@@ -84,7 +84,7 @@ instance FromTxt (Slug x) where
 -- 
 toSlug :: ToTxt a => a -> Slug b
 toSlug = Slug . Txt.intercalate "-" . Txt.words . Txt.toLower . Txt.map f . Txt.replace "'" "" . toTxt
-    where f c | isAlphaNum c = c | otherwise = ' 
+    where f c | isAlphaNum c = c | otherwise = ' '
 
 data family Resource resource :: *
 data family Product resource :: *
