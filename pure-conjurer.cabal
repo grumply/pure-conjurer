@@ -19,6 +19,7 @@ library
   build-depends:
       base
     , pure-auth
+    , pure-default
     , pure-elm
     , pure-hooks
     , pure-json
@@ -36,8 +37,25 @@ library
   exposed-modules:
     Pure.Conjurer
     Pure.Conjurer.Analytics
-    Pure.Conjurer.Field
-    Pure.Conjurer.Form
+    Pure.Conjurer.API
+    Pure.Conjurer.Callbacks
+    Pure.Conjurer.Context
+    Pure.Conjurer.Creatable
+    Pure.Conjurer.Fieldable
+    Pure.Conjurer.Formable
+    Pure.Conjurer.Index
+    Pure.Conjurer.Listable
+    Pure.Conjurer.Key
+    Pure.Conjurer.Listing
+    Pure.Conjurer.Pathable
+    Pure.Conjurer.Permissions
+    Pure.Conjurer.Previewable
+    Pure.Conjurer.Producible
+    Pure.Conjurer.Readable
+    Pure.Conjurer.Resource
+    Pure.Conjurer.Rootable
+    Pure.Conjurer.Slug
+    Pure.Conjurer.Updatable
 
   default-language: Haskell2010
 
@@ -71,6 +89,8 @@ library
     TypeOperators
     InstanceSigs
     ExistentialQuantification
+    RoleAnnotations
+    FunctionalDependencies
   
   if !impl(ghcjs)
     build-depends:

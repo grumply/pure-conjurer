@@ -63,7 +63,7 @@ newSessionId = SessionId <$> markIO
 data SessionMsg
   = SessionStart Time IP
   | SessionUser Time Username 
-  | SessionRead Time (Key Any)
+  | SessionRead Time Txt
   | SessionEnd Time
   deriving stock Generic
   deriving anyclass (ToJSON,FromJSON)
@@ -84,25 +84,40 @@ instance Aggregable SessionMsg Session where
 
 --------------------------------------------------------------------------------
 
-data AnalyticsMsg resource
-  = ResourceRead Time SessionId (Key resource)
+data AnalyticsMsg a
+  = ResourceRead Time SessionId (Context a) (Name a)
   deriving stock Generic
-  deriving anyclass (ToJSON,FromJSON)
+  
+deriving instance (ToJSON (Context a),ToJSON (Name a))
+  => ToJSON (AnalyticsMsg a)
+  
+deriving instance (FromJSON (Context a),FromJSON (Name a))
+  => FromJSON (AnalyticsMsg a)
 
-instance Typeable resource => Source (AnalyticsMsg resource) where
-  data Stream (AnalyticsMsg resource) = AnalyticsStream 
-    deriving stock Generic
-    deriving anyclass Hashable
+instance 
+  ( Typeable a
+  , ToJSON (Context a), FromJSON (Context a)
+  , ToJSON (Name a), FromJSON (Name a)
+  ) => Source (AnalyticsMsg a) 
+  where
+    data Stream (AnalyticsMsg a) = AnalyticsStream 
+      deriving stock Generic
+      deriving anyclass Hashable
 
-  stream AnalyticsStream =
-    let root = "conjuredb/" ++ show (typeRepTyCon (typeOf (undefined :: resource)))
-    in root ++ "/analytics.stream" 
+    stream AnalyticsStream =
+      "conjuredb/analytics/" 
+        ++ show (typeRepTyCon (typeOf (undefined :: a))) 
+        ++ "/analytics.stream" 
 
 data Analytics = Analytics 
-instance Typeable resource => Aggregable (AnalyticsMsg resource) Analytics where
-  update _ _ = Ignore
-
-  aggregate = "analytics.aggregate"
+instance 
+  ( Typeable a 
+  , ToJSON (Context a), FromJSON (Context a)
+  , ToJSON (Name a), FromJSON (Name a)
+  ) => Aggregable (AnalyticsMsg a) Analytics 
+  where
+    update _ _ = Ignore
+    aggregate = "analytics.aggregate"
 
 --------------------------------------------------------------------------------
 
@@ -119,11 +134,17 @@ recordSessionUser sid un = do
   now <- time 
   Sorcerer.write (SessionStream sid) (SessionUser now un)
 
-recordRead :: forall resource. Typeable resource => SessionId -> Key resource -> IO ()
-recordRead sid key = do
+recordRead 
+  :: forall a. 
+    ( Typeable a
+    , Readable a
+    , ToJSON (Context a), FromJSON (Context a)
+    , ToJSON (Name a), FromJSON (Name a)
+    ) => SessionId -> Context a -> Name a -> IO ()
+recordRead sid ctx name = do
   now <- time
-  Sorcerer.write (SessionStream sid) (SessionRead now (unsafeCoerce key))
-  Sorcerer.write (AnalyticsStream :: Stream (AnalyticsMsg resource)) (ResourceRead now sid key)
+  Sorcerer.write (SessionStream sid) (SessionRead now (toReadRoute ctx name))
+  Sorcerer.write (AnalyticsStream @a) (ResourceRead now sid ctx name)
 
 recordSessionEnd :: SessionId -> IO ()
 recordSessionEnd sid = do
@@ -132,11 +153,17 @@ recordSessionEnd sid = do
 
 --------------------------------------------------------------------------------  
 
-addAnalytics :: Typeable resource => SessionId -> Callbacks resource -> Callbacks resource
+addAnalytics 
+  :: forall a.
+    ( Typeable a
+    , Readable a
+    , ToJSON (Context a), FromJSON (Context a)
+    , ToJSON (Name a), FromJSON (Name a)
+    )  => SessionId -> Callbacks a -> Callbacks a
 addAnalytics sid cbs = cbs { onRead = analyzeRead }
   where
-    analyzeRead owner key product = do
-      recordRead sid key
-      onRead cbs owner key product
+    analyzeRead ctx name product = do
+      recordRead sid ctx name
+      onRead cbs ctx name product
 
 --------------------------------------------------------------------------------
