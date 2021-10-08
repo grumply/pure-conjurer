@@ -12,7 +12,7 @@ TODO: interface hiding via export control
 import Pure.Conjurer.Form
 import Pure.Conjurer.Field
 
-import Pure.Auth (Username,Token(..),withToken)
+import Pure.Auth (Username,Token(..),authorize)
 import Pure.Sync
 import Pure.Data.JSON hiding (Index,Key)
 import Pure.Data.Marker
@@ -836,8 +836,9 @@ handleReadListing Permissions {..} Callbacks {..} = responding do
       pure Nothing
   reply response
 
-root :: forall resource. Typeable resource => Txt
-root = "/" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: resource)))))
+root :: forall _role resource. (Typeable _role, Typeable resource) => Txt
+root = "/" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: _role))))) 
+    <> "/" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: resource)))))
 
 class Pathable a where
   toPath :: a -> Txt
@@ -891,12 +892,12 @@ instance (Typeable a, Typeable b, GPathable a, GPathable b) => GPathable ((:*:) 
     mb <- gfromPath
     pure ((:*:) <$> ma <*> mb)
 
-data Read resource = Read Username (Key resource)
-class Typeable resource => Readable resource where
-  readRoute :: (Read resource -> rt) -> Routing rt ()
+data Read _role resource = Read Username (Key resource)
+class (Typeable _role, Typeable resource) => Readable _role resource where
+  readRoute :: (Read _role resource -> rt) -> Routing rt ()
   readRoute f =
     void do
-      path (root @resource) do
+      path (root @_role @resource) do
         path "/:username" do
           un <- "username"
           mi <- fromPath
@@ -904,11 +905,11 @@ class Typeable resource => Readable resource where
             Nothing -> continue
             Just i -> dispatch (f (Read un i))
 
-  toReadRoute :: Read resource -> Txt
-  toReadRoute (Read un i) = root @resource <> "/" <> toTxt un <> toPath i
+  toReadRoute :: Read _role resource -> Txt
+  toReadRoute (Read un i) = root @_role @resource <> "/" <> toTxt un <> toPath i
 
-  toRead :: WebSocket -> Read resource -> View
-  default toRead :: (Component (Product resource), FromJSON (Product resource)) => WebSocket -> Read resource -> View
+  toRead :: WebSocket -> Read _role resource -> View
+  default toRead :: (Component (Product resource), FromJSON (Product resource)) => WebSocket -> Read _role resource -> View
   toRead ws (Read un i) = producing producer (consuming consumer)
     where
       producer = sync (request (resourceReadingAPI @resource) ws (readProduct @resource) (un,i))
@@ -919,22 +920,22 @@ class (Typeable resource, Typeable _role, ToJSON (Resource resource)) => Creatab
   createRoute :: (Create _role resource -> rt) -> Routing rt ()
   createRoute f =
     void do
-      path (root @resource) do
+      path (root @_role @resource) do
         path "/new/:username" do
           un <- "username"
           dispatch (f (Create un))
 
   toCreateRoute :: Create _role resource -> Txt
-  toCreateRoute (Create un) = root @resource <> "/new/" <> toTxt un
+  toCreateRoute (Create un) = root @_role @resource <> "/new/" <> toTxt un
 
   toCreate :: WebSocket -> Create _role resource -> View
-  default toCreate :: (Readable resource, Default (Resource resource), Form (Resource resource)) => WebSocket -> Create _role resource -> View
+  default toCreate :: (Readable _role resource, Default (Resource resource), Form (Resource resource)) => WebSocket -> Create _role resource -> View
   toCreate ws c@(Create un) =
-    withToken @_role $ maybe "Not Authorized" $ \(Token (_,_)) -> 
+    authorize @_role $ maybe "Not Authorized" $ \(Token (_,_)) -> 
       let 
         onSubmit resource = do
           mi <- sync (request (resourcePublishingAPI @resource) ws (createResource @resource) (un,resource))
-          for_ mi (Router.goto . toReadRoute . Read un)
+          for_ mi (Router.goto . toReadRoute . (Read un :: Key resource -> Read _role resource))
       in 
         form onSubmit def
 
@@ -943,7 +944,7 @@ class (Typeable _role, Typeable resource, ToJSON (Resource resource), FromJSON (
   updateRoute :: (Update _role resource -> rt) -> Routing rt ()
   updateRoute f =
     void do
-      path (root @resource) do
+      path (root @_role @resource) do
         path "/update/:username" do
           un <- "username"
           mkey <- fromPath
@@ -952,12 +953,12 @@ class (Typeable _role, Typeable resource, ToJSON (Resource resource), FromJSON (
             Nothing  -> continue
 
   toUpdateRoute :: Update _role resource -> Txt
-  toUpdateRoute (Update un key) = root @resource <> "/update/" <> toTxt un <> toPath key 
+  toUpdateRoute (Update un key) = root @_role @resource <> "/update/" <> toTxt un <> toPath key 
 
   toUpdate :: WebSocket -> Update _role resource -> View
-  default toUpdate :: (Readable resource, Form (Resource resource)) => WebSocket -> Update _role resource -> View
+  default toUpdate :: (Readable _role resource, Form (Resource resource)) => WebSocket -> Update _role resource -> View
   toUpdate ws (Update un key) =
-    withToken @_role $ maybe "Not Authorized" $ \(Token (_,_)) ->
+    authorize @_role $ maybe "Not Authorized" $ \(Token (_,_)) ->
       producing producer (consuming consumer)
     where
       producer = sync (request (resourcePublishingAPI @resource) ws (readResource @resource) (un,key))
@@ -966,24 +967,24 @@ class (Typeable _role, Typeable resource, ToJSON (Resource resource), FromJSON (
       onSubmit resource = do
         did <- sync (request (resourcePublishingAPI @resource) ws (updateResource @resource) (un,key,resource))
         case did of
-          Just True -> Router.goto (toReadRoute (Read un key))
+          Just True -> Router.goto (toReadRoute (Read un key :: Read _role resource))
           _         -> pure ()
 
-data List resource = List Username
-class (Typeable resource) => Listable resource where
-  listRoute :: (List resource -> rt) -> Routing rt ()
+data List _role resource = List Username
+class (Typeable _role, Typeable resource) => Listable _role resource where
+  listRoute :: (List _role resource -> rt) -> Routing rt ()
   listRoute f =
     void do
-      path (root @resource) do
+      path (root @_role @resource) do
         path "/list/:username" do
           un <- "username"
           dispatch (f (List un))
 
-  toListRoute :: List resource -> Txt
-  toListRoute (List un) = root @resource <> "/list/" <> toTxt un
+  toListRoute :: List _role resource -> Txt
+  toListRoute (List un) = root @_role @resource <> "/list/" <> toTxt un
 
-  toList :: WebSocket -> List resource -> View
-  default toList :: (Component (KeyedPreview resource), FromJSON (Preview resource)) => WebSocket -> List resource -> View
+  toList :: WebSocket -> List _role resource -> View
+  default toList :: (Component (KeyedPreview resource), FromJSON (Preview resource)) => WebSocket -> List _role resource -> View
   toList ws (List un) =
      producing producer (consuming (maybe "Not Found" consumer))
     where
@@ -1108,8 +1109,9 @@ handleReadSublisting Permissions {..} Callbacks {..} = responding do
       pure Nothing
   reply response
 
-subroot :: forall parent resource. (Typeable parent, Typeable resource) => Txt
-subroot = "/" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: parent))))) <> 
+subroot :: forall _role parent resource. (Typeable _role, Typeable parent, Typeable resource) => Txt
+subroot = "/" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: _role))))) <> 
+          "/" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: parent))))) <>  
           "-" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: resource)))))
 
 data SubCreate _role parent resource = SubCreate Username (Context _role parent resource)
@@ -1120,7 +1122,7 @@ class (Typeable parent, Typeable resource, Typeable _role, ToJSON (Resource reso
   default subCreateRoute :: Pathable (Context _role parent resource) => (SubCreate _role parent resource -> rt) -> Routing rt ()
   subCreateRoute f =
     void do
-      path (subroot @parent @resource) do
+      path (subroot @_role @parent @resource) do
         path "/new/:username" do
           un <- "username"
           mctx <- fromPath @(Context _role parent resource)
@@ -1133,26 +1135,26 @@ class (Typeable parent, Typeable resource, Typeable _role, ToJSON (Resource reso
 
   toSubCreateRoute :: SubCreate _role parent resource -> Txt
   default toSubCreateRoute :: Pathable (Context _role parent resource) => SubCreate _role parent resource -> Txt
-  toSubCreateRoute (SubCreate un ctx) = subroot @parent @resource <> "/new/" <> toTxt un <> toPath ctx
+  toSubCreateRoute (SubCreate un ctx) = subroot @_role @parent @resource <> "/new/" <> toTxt un <> toPath ctx
 
   toSubCreate :: WebSocket -> SubCreate _role parent resource -> View
-  default toSubCreate :: (Readable resource, Form (Resource resource), Default (Resource resource)) => WebSocket -> SubCreate _role parent resource -> View
+  default toSubCreate :: (Readable _role resource, Form (Resource resource), Default (Resource resource)) => WebSocket -> SubCreate _role parent resource -> View
   toSubCreate ws c@(SubCreate un ctx) =
-    withToken @_role $ maybe "Not Authorized" $ \(Token (_,_)) -> 
+    authorize @_role $ maybe "Not Authorized" $ \(Token (_,_)) -> 
       let 
         onSubmit res = do
           resource <- build ctx res
           mi <- sync (request (resourcePublishingAPI @resource) ws (createResource @resource) (un,resource))
-          for_ mi (Router.goto . toReadRoute . Read un)
+          for_ mi (Router.goto . toReadRoute . (Read un :: Key resource -> Read _role resource))
       in 
         form onSubmit def
 
-data Sublist parent resource = Sublist Username (Key parent)
-class (Typeable parent, Typeable resource) => Sublistable parent resource where
-  sublistRoute :: (Sublist parent resource -> rt) -> Routing rt ()
+data Sublist _role parent resource = Sublist Username (Key parent)
+class (Typeable _role, Typeable parent, Typeable resource) => Sublistable _role parent resource where
+  sublistRoute :: (Sublist _role parent resource -> rt) -> Routing rt ()
   sublistRoute f =
     void do
-      path (subroot @parent @resource) do
+      path (subroot @_role @parent @resource) do
         path "/list/:username" do
           un <- "username"
           mc <- fromPath @(Key parent)
@@ -1160,11 +1162,11 @@ class (Typeable parent, Typeable resource) => Sublistable parent resource where
             Nothing -> continue
             Just i  -> dispatch (f (Sublist un i))
             
-  toSublistRoute :: Sublist parent resource -> Txt
-  toSublistRoute (Sublist un k) = root @resource <> "/list/" <> toTxt un <> toPath k
+  toSublistRoute :: Sublist _role parent resource -> Txt
+  toSublistRoute (Sublist un k) = subroot @_role @parent @resource <> "/list/" <> toTxt un <> toPath k
 
-  toSublist :: WebSocket -> Sublist parent resource -> View
-  default toSublist :: (FromJSON (Preview resource), Component (KeyedPreview resource)) => WebSocket -> Sublist parent resource -> View
+  toSublist :: WebSocket -> Sublist _role parent resource -> View
+  default toSublist :: (FromJSON (Preview resource), Component (KeyedPreview resource)) => WebSocket -> Sublist _role parent resource -> View
   toSublist ws (Sublist un k) =
      producing producer (consuming (maybe "Not Found" consumer))
     where
@@ -1176,12 +1178,12 @@ class (Typeable parent, Typeable resource) => Sublistable parent resource where
 data ResourceRoute _role resource
   = CreateR (Create _role resource)
   | UpdateR (Update _role resource)
-  | ReadR (Read resource)
-  | ListR (List resource)
+  | ReadR (Read _role resource)
+  | ListR (List _role resource)
 
 resourcePage 
   :: forall _role resource.  
-    ( Readable resource, Creatable _role resource, Updatable _role resource, Listable resource
+    ( Readable _role resource, Creatable _role resource, Updatable _role resource, Listable _role resource
     ) => WebSocket -> ResourceRoute _role resource -> View
 resourcePage ws = \case
   CreateR c -> toCreate ws c
@@ -1192,7 +1194,7 @@ resourcePage ws = \case
 resourceRoutes 
   :: forall _role resource route. 
     ( Typeable resource
-    , Readable resource, Creatable _role resource, Updatable _role resource, Listable resource 
+    , Readable _role resource, Creatable _role resource, Updatable _role resource, Listable _role resource 
     ) => (ResourceRoute _role resource -> route) -> Routing route ()
 resourceRoutes lift = do
   listRoute (lift . ListR)
@@ -1203,7 +1205,7 @@ resourceRoutes lift = do
 resourceLocation 
   :: forall _role resource. 
     ( Typeable resource
-    , Readable resource, Creatable _role resource, Updatable _role resource, Listable resource
+    , Readable _role resource, Creatable _role resource, Updatable _role resource, Listable _role resource
     ) => ResourceRoute _role resource -> Txt
 resourceLocation = \case
   CreateR r -> toCreateRoute r
@@ -1214,7 +1216,7 @@ resourceLocation = \case
 ref 
   :: forall _role resource a. 
     ( Typeable resource
-    , Readable resource, Creatable _role resource, Updatable _role resource, Listable resource
+    , Readable _role resource, Creatable _role resource, Updatable _role resource, Listable _role resource
     , HasFeatures a
     ) => ResourceRoute _role resource -> a -> a
 ref = lref . resourceLocation
@@ -1222,7 +1224,7 @@ ref = lref . resourceLocation
 goto 
   :: forall _role resource. 
     ( Typeable resource
-    , Readable resource, Creatable _role resource, Updatable _role resource, Listable resource
+    , Readable _role resource, Creatable _role resource, Updatable _role resource, Listable _role resource
     ) => ResourceRoute _role resource -> IO ()
 goto = Router.goto . resourceLocation
 
@@ -1231,13 +1233,13 @@ goto = Router.goto . resourceLocation
 data SubresourceRoute _role parent resource
   = SubCreateR (SubCreate _role parent resource)
   | SubUpdateR (Update _role resource)
-  | SubReadR (Read resource)
-  | SublistR (Sublist parent resource)
+  | SubReadR (Read _role resource)
+  | SublistR (Sublist _role parent resource)
 
 subresourcePage 
   :: forall _role parent resource. 
-    ( Sublistable parent resource
-    , Readable resource
+    ( Sublistable _role parent resource
+    , Readable _role resource
     , Updatable _role resource
     , SubCreatable _role parent resource 
     ) => WebSocket -> SubresourceRoute _role parent resource -> View
@@ -1250,7 +1252,7 @@ subresourcePage ws = \case
 subresourceRoutes
   :: forall _role parent resource route.
     ( Typeable parent, Typeable resource 
-    , Sublistable parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable resource
+    , Sublistable _role parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable _role resource
     ) => (SubresourceRoute _role parent resource -> route) -> Routing route ()
 subresourceRoutes lift = do
   sublistRoute (lift . SublistR)
@@ -1261,7 +1263,7 @@ subresourceRoutes lift = do
 subresourceLocation
   :: forall _role parent resource.
     ( Typeable parent, Typeable resource
-    , Sublistable parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable resource
+    , Sublistable _role parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable _role resource
     ) => SubresourceRoute _role parent resource -> Txt
 subresourceLocation = \case
   SublistR r -> toSublistRoute r
@@ -1272,7 +1274,7 @@ subresourceLocation = \case
 subref 
   :: forall _role parent resource a. 
     ( Typeable parent, Typeable resource
-    , Sublistable parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable resource
+    , Sublistable _role parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable _role resource
     , HasFeatures a
     ) => SubresourceRoute _role parent resource -> a -> a
 subref = lref . subresourceLocation
@@ -1280,6 +1282,6 @@ subref = lref . subresourceLocation
 subgoto 
   :: forall _role parent resource. 
     ( Typeable parent, Typeable resource
-    , Sublistable parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable resource
+    , Sublistable _role parent resource, SubCreatable _role parent resource, Updatable _role resource, Readable _role resource
     ) => SubresourceRoute _role parent resource -> IO ()
 subgoto = Router.goto . subresourceLocation 
