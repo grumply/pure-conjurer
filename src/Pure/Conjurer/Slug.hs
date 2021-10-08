@@ -22,7 +22,7 @@ instance FromTxt (Slug x) where
 
 instance Pathable (Slug a) where
   toPath (Slug s) = "/" <> s
-  fromPath = path' "/:slug" "/slug"
+  fromPath = path' "/:slug" "slug"
 
 -- Idempotent.
 --
