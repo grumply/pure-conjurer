@@ -1,5 +1,6 @@
 module Pure.Conjurer.Pathable where
 
+import Pure.Auth
 import Pure.Data.Txt
 import Pure.Data.Marker
 import Pure.Router
@@ -32,6 +33,10 @@ instance (TypeError (Text "String is not safely Pathable; use Slug.")) => Pathab
 instance Pathable () where
   toPath _ = ""
   fromPath = pure (Just ())
+
+instance Pathable Username where
+  toPath un = "/" <> toTxt un
+  fromPath = path' "/:username" "username"
 
 class GPathable f where
   gtoPath :: f a -> Txt
