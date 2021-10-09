@@ -22,18 +22,30 @@ instance Fieldable a => GFieldable (K1 r a) where
 
 instance Fieldable Txt where
   field onchange initial =
-    Input <| Type "text" . OnInput (withInput onchange) . Value initial
+    Input 
+      <| Type "text" 
+       . OnInput (withInput onchange) 
+       . Value initial
 
 instance Fieldable Bool where
   field onchange initial =
     -- Keep an eye on this; checked status does not fire change events.
-    Input <| Type "checkbox" . OnInput (withChecked onchange) . Checked (if initial then "true" else "false")
+    Input 
+      <| Type "checkbox" 
+       . OnInput (withChecked onchange) 
+       . Checked (if initial then "true" else "false")
 
 instance Fieldable Int where
   field onchange initial =
-    Input <| Type "number" . OnInput (withInput (maybe def onchange . readMaybe . fromTxt)) . Value (toTxt initial)
+    Input 
+      <| Type "number" 
+       . OnInput (withInput (maybe def onchange . readMaybe . fromTxt)) 
+       . Value (toTxt initial)
 
 instance Fieldable String where
   field onchange initial =
-    Input <| Type "text" . OnInput (withInput (onchange . fromTxt)) . Value (toTxt initial)
+    Input 
+      <| Type "text" 
+       . OnInput (withInput (onchange . fromTxt)) 
+       . Value (toTxt initial)
 

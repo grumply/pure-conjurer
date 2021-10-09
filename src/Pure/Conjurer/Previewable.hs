@@ -20,8 +20,14 @@ class Previewable a where
   preview :: Resource a -> Product a -> IO (Preview a)
   default preview :: Typeable a => Resource a -> Product a -> IO (Preview a)
   preview _ _ =
-    let tc = show (typeRepTyCon (typeOf (undefined :: a)))
-    in pure (error $ "Previewable " <> tc <> " => preview :: Resource " <> tc <> " -> Product " <> tc <> " -> IO (Preview " <> tc <> "): Not implemented.")
+    let 
+      tc = show (typeRepTyCon (typeOf (undefined :: a)))
+      err = "Previewable " <> tc 
+         <> " => preview :: Resource " <> tc 
+         <> " -> Product " <> tc 
+         <> " -> IO (Preview " <> tc <> "): Not implemented."
+    in 
+      pure (error err)
 
 data PreviewMsg a
   = SetPreview (Preview a)

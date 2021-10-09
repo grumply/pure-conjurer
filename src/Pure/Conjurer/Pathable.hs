@@ -22,13 +22,19 @@ instance Pathable Marker where
   toPath m = "/" <> toTxt m
   fromPath = path' "/:marker" "marker"
 
-instance (TypeError (Text "Txt is not safely Pathable; use Slug.")) => Pathable Txt where
-  toPath = error "unreachable"
-  fromPath = error "unreachable"
+instance 
+  ( TypeError (Text "Txt is not safely Pathable. Use Pure.Conjurer.Slug.")
+  ) => Pathable Txt 
+  where
+    toPath = error "unreachable"
+    fromPath = error "unreachable"
 
-instance (TypeError (Text "String is not safely Pathable; use Slug.")) => Pathable String where
-  toPath = error "unreachable"
-  fromPath = error "unreachable"
+instance 
+  ( TypeError (Text "String is not safely Pathable. Use Pure.Conjurer.Slug.")
+  ) => Pathable String 
+  where
+    toPath = error "unreachable"
+    fromPath = error "unreachable"
 
 instance Pathable () where
   toPath _ = ""
@@ -44,7 +50,9 @@ class GPathable f where
 
 instance GPathable V1 where
   gtoPath _ = ""
-  gfromPath = pure (Just (error "GPathable V1 => gfromPath: tried to materialize a void type."))
+  gfromPath = 
+    let err = "GPathable V1 => gfromPath: tried to materialize a void type."
+    in pure (Just (error err))
 
 instance GPathable U1 where
   gtoPath _ = ""
@@ -58,10 +66,13 @@ instance Pathable x => GPathable (K1 r x) where
   gtoPath (K1 x) = toPath x
   gfromPath = fmap (fmap K1) fromPath
 
-instance (Typeable a, Typeable b, GPathable a, GPathable b) => GPathable ((:*:) a b) where
-  gtoPath (a :*: b) = gtoPath a <> gtoPath b
-  gfromPath = do
-    ma <- gfromPath 
-    mb <- gfromPath
-    pure ((:*:) <$> ma <*> mb)
-
+instance 
+  ( Typeable a, Typeable b
+  , GPathable a, GPathable b
+  ) => GPathable ((:*:) a b) 
+  where
+    gtoPath (a :*: b) = gtoPath a <> gtoPath b
+    gfromPath = do
+      ma <- gfromPath 
+      mb <- gfromPath
+      pure ((:*:) <$> ma <*> mb)

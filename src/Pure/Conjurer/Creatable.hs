@@ -21,7 +21,9 @@ import Data.Typeable
 
 class Creatable _role resource | resource -> _role where
   createRoute :: (Context resource -> rt) -> Routing rt ()
-  default createRoute :: (Rootable resource, Pathable (Context resource)) => (Context resource -> rt) -> Routing rt ()
+  default createRoute 
+    :: ( Rootable resource, Pathable (Context resource)
+       ) => (Context resource -> rt) -> Routing rt ()
   createRoute f =
     void do
       path (root @resource) do
@@ -32,7 +34,9 @@ class Creatable _role resource | resource -> _role where
             Nothing  -> continue
 
   toCreateRoute :: Context resource -> Txt
-  default toCreateRoute :: (Rootable resource, Pathable (Context resource)) => Context resource -> Txt
+  default toCreateRoute 
+    :: ( Rootable resource, Pathable (Context resource)
+       ) => Context resource -> Txt
   toCreateRoute ctx = root @resource <> "/new" <> toPath ctx
 
   toCreate :: WebSocket -> Context resource -> View
@@ -48,7 +52,10 @@ class Creatable _role resource | resource -> _role where
     authorize @_role $ maybe "Not Authorized" $ \_ -> 
       let 
         onSubmit resource = do
-          mi <- sync (request (publishingAPI @resource) ws (createResource @resource) (ctx,resource))
+          mi <- sync do
+            request (publishingAPI @resource) ws 
+              (createResource @resource) 
+              (ctx,resource)
           for_ mi (Router.goto . toReadRoute ctx)
       in 
         form onSubmit def

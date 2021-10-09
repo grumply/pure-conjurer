@@ -77,7 +77,8 @@ tryCreate Callbacks {..} ctx name a0 = do
           Sorcerer.write (ProductStream ctx name) (SetProduct pro)
           Sorcerer.write (PreviewStream ctx name) (SetPreview pre)
           Sorcerer.write (IndexStream @a) (ResourceAdded ctx name)
-          ~(Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- Sorcerer.transact (UserListingStream ctx) (SetPreviewItem name pre)
+          ~(Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- 
+            Sorcerer.transact (UserListingStream ctx) (SetPreviewItem name pre)
           onCreate ctx name new pro pre
           pure True
         _ ->
@@ -106,7 +107,8 @@ tryUpdate Callbacks {..} ctx name a0 = do
           pre <- preview new pro
           Sorcerer.write (ProductStream ctx name) (SetProduct pro)
           Sorcerer.write (PreviewStream ctx name) (SetPreview pre)
-          ~(Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- Sorcerer.transact (UserListingStream ctx) (SetPreviewItem name pre)
+          ~(Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- 
+            Sorcerer.transact (UserListingStream ctx) (SetPreviewItem name pre)
           onUpdate ctx name new pro pre
           pure True
         _ ->
@@ -128,7 +130,8 @@ tryDelete Callbacks {..} ctx name =
     Deleted r -> do
       ~(Deleted pre) <- Sorcerer.observe (PreviewStream ctx name) DeletePreview
       ~(Deleted pro) <- Sorcerer.observe (ProductStream ctx name) DeleteProduct
-      ~(Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- Sorcerer.transact (UserListingStream ctx) (DeletePreviewItem name)
+      ~(Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- 
+        Sorcerer.transact (UserListingStream ctx) (DeletePreviewItem name)
       onDelete ctx name r pro pre
       pure True
     _ -> do
@@ -175,7 +178,7 @@ tryReadListing ctx =
 
 --------------------------------------------------------------------------------
 
-publishingBackend :: 
+publishing :: 
   ( Typeable a
   , Processable a, Nameable a, Previewable a, Producible a 
   , ToJSON (Resource a), FromJSON (Resource a)
@@ -185,8 +188,9 @@ publishingBackend ::
   , ToJSON (Name a), FromJSON (Name a)
   , Pathable (Context a), Hashable (Context a)
   , Pathable (Name a), Hashable (Name a), Eq (Name a)
-  ) => Permissions a -> Callbacks a -> Endpoints '[] (ResourcePublishingAPI a) '[] (ResourcePublishingAPI a)
-publishingBackend ps cs = Endpoints publishingAPI msgs reqs
+  ) => Permissions a -> Callbacks a 
+    -> Endpoints '[] (PublishingAPI a) '[] (PublishingAPI a)
+publishing ps cs = Endpoints publishingAPI msgs reqs
   where
     msgs = WS.none
     reqs = handleCreateResource ps cs 
@@ -195,7 +199,7 @@ publishingBackend ps cs = Endpoints publishingAPI msgs reqs
        <:> handleDeleteResource ps cs
        <:> WS.none
 
-readingBackend :: 
+reading :: 
   ( Typeable a
   , ToJSON (Product a), FromJSON (Product a)
   , ToJSON (Preview a), FromJSON (Preview a)
@@ -203,8 +207,9 @@ readingBackend ::
   , ToJSON (Name a), FromJSON (Name a)
   , Pathable (Context a), Hashable (Context a)
   , Pathable (Name a), Hashable (Name a), Eq (Name a)
-  ) => Permissions a -> Callbacks a -> Endpoints '[] (ResourceReadingAPI a) '[] (ResourceReadingAPI a)
-readingBackend ps cs = Endpoints readingAPI msgs reqs
+  ) => Permissions a -> Callbacks a 
+    -> Endpoints '[] (ReadingAPI a) '[] (ReadingAPI a)
+reading ps cs = Endpoints readingAPI msgs reqs
   where
     msgs = WS.none
     reqs = handleReadProduct ps cs 

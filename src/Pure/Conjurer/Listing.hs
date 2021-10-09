@@ -70,10 +70,22 @@ instance {-# OVERLAPPABLE #-}
     update = defaultListingUpdate id 
     aggregate = "listing.aggregate"
 
-defaultListingUpdate :: Eq (Name x) => (forall a. [a] -> [a]) -> ListingMsg x -> Maybe (Listing x) -> Maybe (Maybe (Listing x))
+defaultListingUpdate 
+  :: Eq (Name x) 
+  => (forall a. [a] -> [a]) 
+  -> ListingMsg x -> Maybe (Listing x) -> Maybe (Maybe (Listing x))
 defaultListingUpdate f = update
   where
-    update (SetPreviewItem nm p) Nothing = Sorcerer.Update Listing { listing = f [(nm,p)] }
-    update (SetPreviewItem nm p) (Just l) = Sorcerer.Update Listing { listing = f $ (nm,p) : List.filter (((/=) nm) . fst) (listing l) }
-    update (DeletePreviewItem nm) (Just l) = Sorcerer.Update l { listing = List.filter ((/= nm) . fst) (listing l) }
+    update (SetPreviewItem nm p) Nothing = 
+      Sorcerer.Update Listing 
+        { listing = f [(nm,p)] }
+
+    update (SetPreviewItem nm p) (Just l) = 
+      Sorcerer.Update Listing 
+        { listing = f $ (nm,p) : List.filter (((/=) nm) . fst) (listing l) }
+
+    update (DeletePreviewItem nm) (Just l) = 
+      Sorcerer.Update l 
+        { listing = List.filter ((/= nm) . fst) (listing l) }
+
     update _ _ = Ignore

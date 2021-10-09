@@ -19,7 +19,9 @@ import Data.Typeable
 
 class Listable resource where
   listRoute :: (Context resource -> rt) -> Routing rt ()
-  default listRoute :: (Rootable resource, Pathable (Context resource)) => (Context resource -> rt) -> Routing rt ()
+  default listRoute 
+    :: ( Rootable resource, Pathable (Context resource)
+       ) => (Context resource -> rt) -> Routing rt ()
   listRoute f =
     void do
       path (root @resource) do
@@ -30,7 +32,9 @@ class Listable resource where
             Nothing  -> continue
 
   toListRoute :: Context resource -> Txt
-  default toListRoute :: (Rootable resource, Pathable (Context resource)) => Context resource -> Txt
+  default toListRoute 
+    :: ( Rootable resource, Pathable (Context resource)
+       ) => Context resource -> Txt
   toListRoute ctx = root @resource <> "/list" <> toPath ctx
 
   toList :: WebSocket -> Context resource -> View
@@ -45,7 +49,11 @@ class Listable resource where
   toList ws ctx =
      producing producer (consuming (maybe "Not Found" consumer))
     where
-      producer = sync (request (readingAPI @resource) ws (readListing @resource) ctx)
+      producer = sync do
+        request (readingAPI @resource) ws 
+          (readListing @resource) 
+          ctx
+
       consumer ps = 
         Ul <||> 
           [ Li <| OnClick (\_ -> Router.goto (toReadRoute ctx nm)) |> 
@@ -53,4 +61,8 @@ class Listable resource where
           | (nm,p) <- ps 
           ]
 
-data KeyedPreview resource = KeyedPreview (Context resource) (Name resource) (Preview resource)
+data KeyedPreview resource = 
+  KeyedPreview 
+    (Context resource) 
+    (Name resource) 
+    (Preview resource)
