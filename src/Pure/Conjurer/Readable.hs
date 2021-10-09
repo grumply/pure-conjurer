@@ -1,4 +1,4 @@
-module Pure.Conjurer.Readable (Readable(..)) where
+module Pure.Conjurer.Readable (Readable(..),cachingToRead) where
 
 import Pure.Conjurer.API
 import Pure.Conjurer.Context
@@ -13,7 +13,9 @@ import Pure.Maybe
 import Pure.Router as Router
 import Pure.Sync
 import Pure.WebSocket
+import Pure.WebSocket.Cache
 
+import Control.Concurrent
 import Data.Typeable
 
 class Readable resource where
@@ -52,3 +54,23 @@ class Readable resource where
           (ctx,nm)
 
       consumer = maybe "Not Found" run
+
+cachingToRead 
+  :: forall resource.
+    ( Typeable resource
+    , Component (Product resource)
+    , FromJSON (Context resource), ToJSON (Context resource), Ord (Context resource)
+    , FromJSON (Name resource), ToJSON (Name resource), Ord (Name resource)
+    , FromJSON (Product resource)
+    ) 
+  => WebSocket -> Context resource -> Name resource -> View
+cachingToRead _ ctx nm = producing producer (consuming consumer)
+  where
+    producer =
+      req Cached (readingAPI @resource)
+        (readProduct @resource) 
+        (ctx,nm)
+
+    consumer = 
+      maybe "Not Found" run
+

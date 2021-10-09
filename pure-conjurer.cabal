@@ -30,6 +30,7 @@ library
     , pure-router
     , pure-sync
     , pure-websocket
+    , pure-websocket-cache
     , pure-sorcerer
     , hashable
     , text
