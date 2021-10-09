@@ -33,6 +33,7 @@ import Control.Concurrent
 import Control.Monad
 import Data.Typeable
 import Data.Hashable
+import GHC.Generics
 
 import Prelude hiding (Read)
 
@@ -382,6 +383,13 @@ data Route _role a
   | UpdateR (Context a) (Name a)
   | ReadR (Context a) (Name a)
   | ListR (Context a)
+  deriving stock Generic
+  
+deriving instance (Ord (Context a), Ord (Name a)) => Ord (Route _role a)
+deriving instance (Eq (Context a), Eq (Name a)) => Eq (Route _role a)
+deriving instance (Show (Context a), Show (Name a)) => Show (Route _role a)
+deriving instance (ToJSON (Context a), ToJSON (Name a)) => ToJSON (Route _role a)
+deriving instance (FromJSON (Context a), FromJSON (Name a)) => FromJSON (Route _role a)
 
 pages 
   :: forall _role a.  
