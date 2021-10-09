@@ -87,13 +87,13 @@ cachingToList shouldPreloadPreviews _ ctx =
 
     consumer ps = 
       Ul <||> 
-        [ Li <| OnClick (\_ -> Router.goto (toReadRoute ctx nm)) . preload ctx nm |> 
+        [ Li <| lref (toReadRoute ctx nm) . preload ctx nm |> 
           [ run (KeyedPreview ctx nm p) ] 
         | (nm,p) <- ps 
         ]
       where
         preload ctx nm 
-          | shouldPreloadPreviews = OnMouseOver load . OnTouchStart load
+          | shouldPreloadPreviews = OnMouseDown load . OnTouchStart load
           | otherwise             = id
           where
             load _ = void $ forkIO $ void $

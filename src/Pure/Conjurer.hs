@@ -22,7 +22,7 @@ import Pure.Conjurer.Updatable as Export
 
 import Pure.Data.JSON (ToJSON,FromJSON)
 import Pure.Data.Txt as Txt
-import Pure.Elm.Component (View,HasFeatures,pattern OnTouchStart,pattern OnMouseOver)
+import Pure.Elm.Component (View,HasFeatures,pattern OnTouchStart,pattern OnMouseDown)
 import Pure.Router as Router (Routing,goto,lref)
 import Pure.Sorcerer as Sorcerer hiding (Read,pattern Update)
 import qualified Pure.Sorcerer as Sorcerer
@@ -448,7 +448,7 @@ preload
     , FromJSON (Preview a)
     , HasFeatures v
     ) => Route _role a -> v -> v
-preload rt = OnMouseOver load . OnTouchStart load
+preload rt = OnMouseDown load . OnTouchStart load
   where
     load _ = case rt of
       ReadR ctx nm -> 
