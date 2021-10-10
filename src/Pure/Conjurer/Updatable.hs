@@ -1,9 +1,10 @@
-module Pure.Conjurer.Updatable (Updatable(..)) where
+module Pure.Conjurer.Updatable (Updatable(..),cachingToUpdate) where
 
 import Pure.Conjurer.API
 import Pure.Conjurer.Context
 import Pure.Conjurer.Formable
 import Pure.Conjurer.Pathable
+import Pure.Conjurer.Producible
 import Pure.Conjurer.Readable
 import Pure.Conjurer.Resource
 import Pure.Conjurer.Rootable
@@ -15,6 +16,7 @@ import Pure.Maybe
 import Pure.Router as Router
 import Pure.Sync
 import Pure.WebSocket
+import Pure.WebSocket.Cache
 
 import Data.Typeable
 
@@ -64,8 +66,45 @@ class Updatable _role resource | resource -> _role where
           request (publishingAPI @resource) ws 
             (updateResource @resource) 
             (ctx,nm,resource)
-
+            
         case did of
           Just True -> Router.goto (toReadRoute ctx nm)
           _         -> pure ()
+
+cachingToUpdate 
+  :: forall _role resource.
+    ( Typeable resource, Typeable _role
+    , ToJSON (Context resource), FromJSON (Context resource), Ord (Context resource)
+    , ToJSON (Name resource), Ord (Name resource)
+    , ToJSON (Resource resource), FromJSON (Resource resource)
+    , FromJSON (Product resource)
+    , Readable resource
+    , Formable (Resource resource)
+    ) => WebSocket -> Context resource -> Name resource -> View
+cachingToUpdate ws ctx nm =
+  authorize @_role $ maybe "Not Authorized" $ \_ ->
+    producing producer (consuming consumer)
+  where
+    producer = sync do 
+      request (publishingAPI @resource) ws 
+        (readResource @resource) 
+        (ctx,nm)
+
+    consumer = maybe "Not Found" (form onSubmit) 
+
+    onSubmit resource = do
+      did <- sync do
+        request (publishingAPI @resource) ws 
+          (updateResource @resource) 
+          (ctx,nm,resource) 
+          
+      case did of
+        Just True -> do
+          req Fresh (readingAPI @resource)
+            (readProduct @resource)
+            (ctx,nm)
+          Router.goto (toReadRoute ctx nm)
+
+        _ -> 
+          pure ()
 

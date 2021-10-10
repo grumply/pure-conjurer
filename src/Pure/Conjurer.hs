@@ -78,10 +78,10 @@ tryCreate Callbacks {..} ctx name a0 = do
         Added (new :: Resource a) -> do
           pro <- produce new
           pre <- preview new pro
-          Sorcerer.write (ProductStream ctx name) (SetProduct pro)
-          Sorcerer.write (PreviewStream ctx name) (SetPreview pre)
+          (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
+          (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
           Sorcerer.write (IndexStream @a) (ResourceAdded ctx name)
-          ~(Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- 
+          (Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- 
             Sorcerer.transact (UserListingStream ctx) (SetPreviewItem name pre)
           onCreate ctx name new pro pre
           pure True
@@ -109,9 +109,9 @@ tryUpdate Callbacks {..} ctx name a0 = do
         Updated _ (new :: Resource a) -> do
           pro <- produce new
           pre <- preview new pro
-          Sorcerer.write (ProductStream ctx name) (SetProduct pro)
-          Sorcerer.write (PreviewStream ctx name) (SetPreview pre)
-          ~(Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- 
+          (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
+          (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
+          (Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- 
             Sorcerer.transact (UserListingStream ctx) (SetPreviewItem name pre)
           onUpdate ctx name new pro pre
           pure True
@@ -132,9 +132,9 @@ tryDelete
 tryDelete Callbacks {..} ctx name =
   Sorcerer.observe (ResourceStream ctx name) DeleteResource >>= \case
     Deleted r -> do
-      ~(Deleted pre) <- Sorcerer.observe (PreviewStream ctx name) DeletePreview
-      ~(Deleted pro) <- Sorcerer.observe (ProductStream ctx name) DeleteProduct
-      ~(Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- 
+      Deleted pre <- Sorcerer.observe (PreviewStream ctx name) DeletePreview
+      Deleted pro <- Sorcerer.observe (ProductStream ctx name) DeleteProduct
+      (Sorcerer.Update (Listing (userListing :: [(Name a,Preview a)]))) <- 
         Sorcerer.transact (UserListingStream ctx) (DeletePreviewItem name)
       onDelete ctx name r pro pre
       pure True
