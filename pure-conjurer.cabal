@@ -32,6 +32,8 @@ library
     , pure-websocket
     , pure-websocket-cache
     , pure-sorcerer
+    , bytestring
+    , containers
     , hashable
     , text
 
@@ -92,6 +94,8 @@ library
     ExistentialQuantification
     RoleAnnotations
     FunctionalDependencies
+    ViewPatterns
+    BangPatterns
   
   if !impl(ghcjs)
     build-depends:

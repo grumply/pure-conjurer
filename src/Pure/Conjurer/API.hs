@@ -13,84 +13,72 @@ import Data.Typeable
 
 data CreateResource resource
 instance Identify (CreateResource resource)
-instance 
-  ( Typeable resource, ToJSON (Context resource), FromJSON (Context resource)
-  ) => Request (CreateResource resource) 
-  where
-    type Req (CreateResource resource) = (Int,(Context resource,Resource resource))
-    type Rsp (CreateResource resource) = Maybe (Name resource)
+instance ( Typeable resource) => Request (CreateResource resource) where
+  type Req (CreateResource resource) = (Int,(Context resource,Resource resource))
+  type Rsp (CreateResource resource) = Maybe (Name resource)
 
 createResource :: Proxy (CreateResource resource)
 createResource = Proxy
 
 data ReadResource resource
 instance Identify (ReadResource resource)
-instance 
-  ( Typeable resource, ToJSON (Context resource), FromJSON (Context resource)
-  ) => Request (ReadResource resource) 
-  where
-    type Req (ReadResource resource) = (Int,(Context resource,Name resource))
-    type Rsp (ReadResource resource) = Maybe (Resource resource)
+instance ( Typeable resource) => Request (ReadResource resource) where
+  type Req (ReadResource resource) = (Int,(Context resource,Name resource))
+  type Rsp (ReadResource resource) = Maybe (Resource resource)
 
 readResource :: Proxy (ReadResource resource)
 readResource = Proxy
 
 data UpdateResource resource
 instance Identify (UpdateResource resource)
-instance 
-  ( Typeable resource, ToJSON (Context resource), FromJSON (Context resource)
-  ) => Request (UpdateResource resource) 
-  where
-    type Req (UpdateResource resource) = (Int,(Context resource,Name resource,Resource resource))
-    type Rsp (UpdateResource resource) = Maybe Bool
+instance ( Typeable resource) => Request (UpdateResource resource) where
+  type Req (UpdateResource resource) = (Int,(Context resource,Name resource,Resource resource))
+  type Rsp (UpdateResource resource) = Maybe Bool
 
 updateResource :: Proxy (UpdateResource resource)
 updateResource = Proxy
 
 data DeleteResource resource
 instance Identify (DeleteResource resource)
-instance 
-  ( Typeable resource, ToJSON (Context resource), FromJSON (Context resource)
-  ) => Request (DeleteResource resource) 
-  where
-    type Req (DeleteResource resource) = (Int,(Context resource,Name resource))
-    type Rsp (DeleteResource resource) = Maybe Bool
+instance ( Typeable resource) => Request (DeleteResource resource) where
+  type Req (DeleteResource resource) = (Int,(Context resource,Name resource))
+  type Rsp (DeleteResource resource) = Maybe Bool
 
 deleteResource :: Proxy (DeleteResource resource)
 deleteResource = Proxy
 
+data PreviewResource resource
+instance Identify (PreviewResource resource)
+instance ( Typeable resource) => Request (PreviewResource resource) where
+  type Req (PreviewResource resource) = (Int,(Context resource,Resource resource))
+  type Rsp (PreviewResource resource) = Maybe (Context resource,Name resource,Preview resource,Product resource,Resource resource)
+
+previewResource :: Proxy (PreviewResource resource)
+previewResource = Proxy
+
 data ReadProduct resource
 instance Identify (ReadProduct resource)
-instance 
-  ( Typeable resource, ToJSON (Context resource), FromJSON (Context resource)
-  ) => Request (ReadProduct resource) 
-  where
-    type Req (ReadProduct resource) = (Int,(Context resource,Name resource))
-    type Rsp (ReadProduct resource) = Maybe (Product resource)
+instance ( Typeable resource) => Request (ReadProduct resource) where
+  type Req (ReadProduct resource) = (Int,(Context resource,Name resource))
+  type Rsp (ReadProduct resource) = Maybe (Product resource)
 
 readProduct :: Proxy (ReadProduct resource)
 readProduct = Proxy
 
 data ReadPreview resource
 instance Identify (ReadPreview resource)
-instance 
-  ( Typeable resource, ToJSON (Context resource), FromJSON (Context resource)
-  ) => Request (ReadPreview resource) 
-  where
-    type Req (ReadPreview resource) = (Int,(Context resource,Name resource))
-    type Rsp (ReadPreview resource) = Maybe (Preview resource)
+instance ( Typeable resource) => Request (ReadPreview resource) where
+  type Req (ReadPreview resource) = (Int,(Context resource,Name resource))
+  type Rsp (ReadPreview resource) = Maybe (Preview resource)
 
 readPreview :: Proxy (ReadPreview resource)
 readPreview = Proxy
 
 data ReadListing resource
 instance Identify (ReadListing resource)
-instance 
-  ( Typeable resource, ToJSON (Context resource), FromJSON (Context resource)
-  ) => Request (ReadListing resource) 
-  where
-    type Req (ReadListing resource) = (Int,Context resource)
-    type Rsp (ReadListing resource) = Maybe [(Name resource,Preview resource)]
+instance ( Typeable resource) => Request (ReadListing resource) where
+  type Req (ReadListing resource) = (Int,Context resource)
+  type Rsp (ReadListing resource) = Maybe [(Name resource,Preview resource)]
 
 readListing :: Proxy (ReadListing resource)
 readListing = Proxy
@@ -100,6 +88,7 @@ type PublishingAPI resource =
    , ReadResource resource
    , UpdateResource resource
    , DeleteResource resource
+   , PreviewResource resource
    ]
 
 type ReadingAPI resource =
@@ -120,6 +109,7 @@ publishingAPI = api msgs reqs
        <:> readResource @resource
        <:> updateResource @resource
        <:> deleteResource @resource
+       <:> previewResource @resource
        <:> WS.none
 
 readingAPI 

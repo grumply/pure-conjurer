@@ -47,10 +47,10 @@ instance
   , ToJSON (Preview a), FromJSON (Preview a)
   ) => Source (ListingMsg a) 
   where
-    data Stream (ListingMsg a) = UserListingStream (Context a)
+    data Stream (ListingMsg a) = ListingStream (Context a)
       deriving stock Generic
 
-    stream (UserListingStream ctx) = 
+    stream (ListingStream ctx) = 
       "conjurer/listings/" 
         ++ show (typeRepTyCon (typeOf (undefined :: a))) 
         ++ fromTxt (toPath ctx)

@@ -1,4 +1,4 @@
-module Pure.Conjurer.Formable (Formable(..)) where
+module Pure.Conjurer.Formable (Formable(..),overwriteTitle) where
 
 import Pure.Conjurer.Fieldable
 import Pure.Elm.Component
@@ -9,10 +9,77 @@ import GHC.Generics as G
 import GHC.TypeLits
 import Unsafe.Coerce
 
+overwriteTitle :: Txt -> CSS ()
+overwriteTitle new =
+  void do
+    has (tag H2) do
+      visibility =: hidden
+      position =: relative
+      after do
+        visibility =: visible
+        position =: absolute
+        left =: 0
+        content =: ("'" <> new <> "'")
+
+data PreviewingForm x = PreviewingForm 
+  { onSubmit  :: x -> IO ()
+  , onPreview :: x -> IO View
+  , runForm :: (x -> IO ()) -> x -> View
+  , initial :: x
+  }
+
+instance Typeable x => Component (PreviewingForm x) where
+  data Model (PreviewingForm x) = Model
+    { current :: x
+    , preview :: Maybe View
+    }
+    
+  initialize PreviewingForm {..} = pure Model 
+    { current = initial
+    , preview = Nothing
+    }
+
+  data Msg (PreviewingForm x)
+    = Edit | Preview | Submit | Update x
+ 
+  upon msg PreviewingForm {..} mdl@Model {..} =
+    case msg of
+      Edit ->
+        pure mdl { preview = Nothing }
+        
+      Preview -> do
+        v <- onPreview current
+        pure mdl { preview = Just v }
+
+      Submit -> do
+        onSubmit current
+        pure mdl
+
+      Update x -> do
+        pure mdl { current = x }
+        
+  view PreviewingForm {..} Model {..} 
+    | Just p <- preview =
+      Div <||>
+        [ Button <| OnClick (\_ -> command Edit)   |> [ "Edit"   ]
+        , Button <| OnClick (\_ -> command Submit) |> [ "Submit" ]
+        , p
+        ]
+    | otherwise =
+      Div <||>
+        [ Button <| OnClick (\_ -> command Preview) |> [ "Preview" ]
+        , Button <| OnClick (\_ -> command Submit)  |> [ "Submit"  ]
+        , runForm (command . Update) current
+        ]
+
 class Formable rec where
-  form :: (rec -> IO ()) -> rec -> View
-  default form :: (Generic rec, GFormable (Rep rec)) => (rec -> IO ()) -> rec -> View
-  form f = gform (f . G.to) . G.from
+  form :: (rec -> IO ()) -> (rec -> IO View) -> rec -> View
+  default form :: (Typeable rec, Generic rec, GFormable (Rep rec)) => (rec -> IO ()) -> (rec -> IO View) -> rec -> View
+  form onSubmit onPreview initial = 
+    run PreviewingForm 
+      { runForm = \f x -> gform (f . G.to) (G.from x)
+      , ..
+      }
 
 class GFormable f where
   gform :: (forall x. f x -> IO ()) -> f x -> View
@@ -20,20 +87,15 @@ class GFormable f where
 instance GFormable x => GFormable (M1 D m x) where
   gform f (M1 x) = gform (f . M1) x
 
-data FormableState a = FS !(forall x. (a x))
-
 instance 
   ( KnownSymbol name, Typeable x, GFormable x
   ) => GFormable (M1 C (MetaCons name _fix True) x) 
   where
     gform f (M1 x) = 
-      useState (FS (unsafeCoerce x :: x y)) $ \State {..} ->
-        let FS x = state
-        in Div <| Class (toTxt (symbolVal @name Proxy)) |>
-            [ H2 <||> [ txt (symbolVal @name Proxy) ]
-            , gform (\r -> modify (\_ -> FS (unsafeCoerce r))) x
-            , Button <| OnClick (\_ -> f (unsafeCoerce x)) |> [ "Submit" ]
-            ]
+      Div <| Class (toTxt (symbolVal @name Proxy)) |>
+        [ H2 <||> [ txt (symbolVal @name Proxy) ]
+        , gform (f . M1) x
+        ]
 
 instance 
   ( Typeable x, GFormable x
@@ -73,7 +135,5 @@ instance
 instance GFormable x => GFormable (M1 S (MetaSel Nothing _u _s _s') x) where
   gform f (M1 x) = gform (f . M1) x
 
-instance Formable x => GFormable (K1 r x) where
-  gform f (K1 x) = form (f . K1) x
 
 

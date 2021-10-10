@@ -1,10 +1,10 @@
-{ mkDerivation, ghc, base, hashable, containers, pure-auth, pure-default, pure-elm, pure-hooks, pure-json, pure-marker, pure-maybe, pure-router, pure-sync, pure-websocket, pure-websocket-cache, pure-time, pure-txt, pure-sorcerer, text, iproute, stdenv }:
+{ mkDerivation, ghc, base, hashable, bytestring, containers, pure-auth, pure-default, pure-elm, pure-hooks, pure-json, pure-marker, pure-maybe, pure-router, pure-sync, pure-websocket, pure-websocket-cache, pure-time, pure-txt, pure-sorcerer, text, iproute, stdenv }:
 mkDerivation {
   pname = "pure-conjurer";
   version = "0.8.0.0";
   src = ./.;
   libraryHaskellDepends = 
-    [ base hashable containers pure-auth pure-default pure-elm pure-hooks pure-json pure-marker pure-maybe pure-router pure-sync pure-websocket pure-websocket-cache pure-time pure-txt pure-sorcerer text ]
+    [ base hashable bytestring containers pure-auth pure-default pure-elm pure-hooks pure-json pure-marker pure-maybe pure-router pure-sync pure-websocket pure-websocket-cache pure-time pure-txt pure-sorcerer text ]
     ++ (if ghc.isGhcjs or false then [ ] else [ iproute ]);
   license = stdenv.lib.licenses.bsd3;
 }
