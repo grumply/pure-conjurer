@@ -1,4 +1,4 @@
-module Pure.Conjurer.Listable (Listable(..),KeyedPreview(..),ShouldPreloadPreviews,cachingToList) where
+module Pure.Conjurer.Listable (Listable(..),ShouldPreloadPreviews,cachingToList) where
 
 import Pure.Conjurer.API
 import Pure.Conjurer.Context
@@ -43,7 +43,7 @@ class Listable resource where
   toList :: WebSocket -> Context resource -> View
   default toList 
     :: ( Typeable resource
-       , Component (KeyedPreview resource)
+       , Component (Preview resource)
        , Readable resource
        , FromJSON (Preview resource)
        , ToJSON (Context resource), FromJSON (Context resource)
@@ -59,8 +59,8 @@ class Listable resource where
 
       consumer ps = 
         Ul <||> 
-          [ Li <| OnClick (\_ -> Router.goto (toReadRoute ctx nm)) |> 
-            [ run (KeyedPreview ctx nm p) ] 
+          [ Li <| lref (toReadRoute ctx nm) |> 
+            [ run p ] 
           | (nm,p) <- ps 
           ]
 
@@ -69,7 +69,7 @@ type ShouldPreloadPreviews = Bool
 cachingToList 
   :: forall resource.
     ( Typeable resource
-    , Component (KeyedPreview resource)
+    , Component (Preview resource)
     , Readable resource
     , FromJSON (Preview resource)
     , ToJSON (Context resource), FromJSON (Context resource), Ord (Context resource)
@@ -88,7 +88,7 @@ cachingToList shouldPreloadPreviews _ ctx =
     consumer ps = 
       Ul <||> 
         [ Li <| lref (toReadRoute ctx nm) . preload ctx nm |> 
-          [ run (KeyedPreview ctx nm p) ] 
+          [ run p ] 
         | (nm,p) <- ps 
         ]
       where
@@ -100,9 +100,3 @@ cachingToList shouldPreloadPreviews _ ctx =
               req Cached (readingAPI @resource) 
                 (readProduct @resource) 
                 (ctx,nm)
-
-data KeyedPreview resource = 
-  KeyedPreview 
-    (Context resource) 
-    (Name resource) 
-    (Preview resource)
