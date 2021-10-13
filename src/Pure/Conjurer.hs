@@ -20,7 +20,7 @@ import Pure.Conjurer.Rootable as Export
 import Pure.Conjurer.Slug as Export
 import Pure.Conjurer.Updatable as Export
 
-import Pure.Data.JSON (ToJSON,FromJSON,encodeBS,decodeBS)
+import Pure.Data.JSON (ToJSON(..),FromJSON(..),encodeBS,decodeBS)
 import Pure.Data.Txt as Txt
 import Pure.Elm.Component (View,HasFeatures,pattern OnTouchStart,pattern OnMouseDown,Theme(..),pattern Themed,(|>),(<|),pattern Div)
 import Pure.Router as Router (Routing,goto,lref)
@@ -821,34 +821,95 @@ customReplyRaw = replyRaw
 
 --------------------------------------------------------------------------------
 
+data ReadR a 
+  = Readable a => ReadR (Context a) (Name a)
+  | Listable a => ListR (Context a)
+    
+deriving instance (Ord (Context a), Ord (Name a)) => Ord (ReadR a)
+deriving instance (Eq (Context a), Eq (Name a)) => Eq (ReadR a)
+deriving instance (Show (Context a), Show (Name a)) => Show (ReadR a)
+instance (ToJSON (Context a), ToJSON (Name a)) => ToJSON (ReadR a) where
+  toJSON (ReadR c n) = toJSON ("ReadR" :: Txt,(c,n))
+  toJSON (ListR c)   = toJSON ("ListR" :: Txt,c)
+instance (Readable a, Listable a, FromJSON (Context a), FromJSON (Name a)) => FromJSON (ReadR a) where
+  parseJSON o = do
+    (x :: Txt,v) <- parseJSON o
+    case x of
+      "ReadR" -> do
+        (c,n) <- parseJSON v
+        pure (ReadR c n)
+      "ListR" -> do
+        c <- parseJSON v
+        pure (ListR c)
+      _ -> 
+        mzero
+
+data PublishR _role a
+  = Creatable _role a => CreateR (Context a)
+  | Updatable _role a => UpdateR (Context a) (Name a)
+
+deriving instance (Ord (Context a), Ord (Name a)) => Ord (PublishR _role a)
+deriving instance (Eq (Context a), Eq (Name a)) => Eq (PublishR _role a)
+deriving instance (Show (Context a), Show (Name a)) => Show (PublishR _role a)
+instance (ToJSON (Context a), ToJSON (Name a)) => ToJSON (PublishR _role a) where
+  toJSON (CreateR c)   = toJSON ("CreateR" :: Txt,c)
+  toJSON (UpdateR c n) = toJSON ("UpdateR" :: Txt,(c,n))
+instance (Updatable _role a, Creatable _role a, FromJSON (Context a), FromJSON (Name a)) => FromJSON (PublishR _role a) where
+  parseJSON o = do
+    (x :: Txt,v) <- parseJSON o
+    case x of
+      "CreateR" -> do
+        c <- parseJSON v
+        pure (CreateR c)
+      "UpdateR" -> do
+        (c,n) <- parseJSON v
+        pure (UpdateR c n)
+      _ ->
+        mzero
+
 data Route _role a
-  = CreateR (Context a)
-  | UpdateR (Context a) (Name a)
-  | ReadR (Context a) (Name a)
-  | ListR (Context a)
-  deriving stock Generic
-  
+  = Reading (ReadR a)
+  | Publishing (PublishR _role a)
+
 deriving instance (Ord (Context a), Ord (Name a)) => Ord (Route _role a)
 deriving instance (Eq (Context a), Eq (Name a)) => Eq (Route _role a)
 deriving instance (Show (Context a), Show (Name a)) => Show (Route _role a)
-deriving instance (ToJSON (Context a), ToJSON (Name a)) => ToJSON (Route _role a)
-deriving instance (FromJSON (Context a), FromJSON (Name a)) => FromJSON (Route _role a)
+instance (ToJSON (ReadR a),ToJSON (PublishR _role a)) => ToJSON (Route _role a) where
+  toJSON (Reading r) = toJSON ("Reading" :: Txt,r)
+  toJSON (Publishing r) = toJSON ("Publishing" :: Txt,r)
+instance (FromJSON (ReadR a),FromJSON (PublishR _role a)) => FromJSON (Route _role a) where
+  parseJSON o = do
+    (x :: Txt,v) <- parseJSON o
+    case x of
+      "Reading" -> do
+        r <- parseJSON v
+        pure (Reading r)
+      "Publishing" -> do
+        r <- parseJSON v
+        pure (Publishing r)
+      _ ->
+        mzero
 
-data Pages = Create | Read | Update | List
+data Pages_ = Create | Read | Update | List
 instance Theme Create
 instance Theme Update
 instance Theme Read
 instance Theme List
 
-pages 
-  :: forall _role a.  
-    ( Theme a, Readable a, Creatable _role a, Updatable _role a, Listable a
-    ) => WebSocket -> Route _role a -> View
+pages :: forall _role a. Typeable a => WebSocket -> Route _role a -> View
 pages ws = \case
-  CreateR ctx    -> Div <| Themed @Create . Themed @a |> [ toCreate ws ctx ]
-  UpdateR ctx nm -> Div <| Themed @Update . Themed @a |> [ toUpdate ws ctx nm ]
-  ReadR   ctx nm -> Div <| Themed @Read   . Themed @a |> [ toRead ws ctx nm ]
-  ListR   ctx    -> Div <| Themed @List   . Themed @a |> [ Export.toList ws ctx ]
+  Reading r -> readPages ws r
+  Publishing r -> publishPages ws r
+  
+readPages :: WebSocket -> ReadR a -> View
+readPages ws = \case
+  ReadR ctx nm -> Div <| Themed @Read |> [ toRead ws ctx nm ]
+  ListR ctx    -> Div <| Themed @List |> [ Export.toList ws ctx ]
+  
+publishPages :: WebSocket -> PublishR _role a -> View
+publishPages ws = \case 
+  CreateR ctx    -> Div <| Themed @Create |> [ toCreate ws ctx ]
+  UpdateR ctx nm -> Div <| Themed @Update |> [ toUpdate ws ctx nm ]
 
 routes 
   :: forall _role a route. 
@@ -856,48 +917,83 @@ routes
     , Readable a, Creatable _role a, Updatable _role a, Listable a 
     ) => (Route _role a -> route) -> Routing route ()
 routes lift = do
+  publishRoutes (lift . Publishing)
+  readRoutes (lift . Reading)
+  
+readRoutes
+  :: forall a route. 
+    ( Typeable a
+    , Readable a, Listable a 
+    ) => (ReadR a -> route) -> Routing route ()
+readRoutes lift = do    
   listRoute (\ctx -> lift (ListR ctx))
+  readRoute (\ctx nm -> lift (ReadR ctx nm))
+    
+publishRoutes 
+  :: forall _role a route. 
+    ( Typeable a
+    , Readable a, Creatable _role a, Updatable _role a, Listable a 
+    ) => (PublishR _role a -> route) -> Routing route ()
+publishRoutes lift = do
   updateRoute (\ctx nm -> lift (UpdateR ctx nm))
   createRoute (\ctx -> lift (CreateR ctx))
-  readRoute (\ctx nm -> lift (ReadR ctx nm))
 
-location 
-  :: forall _role a. 
-    ( Typeable a
-    , Readable a, Creatable _role a, Updatable _role a, Listable a
-    ) => Route _role a -> Txt
+location :: Route _role a -> Txt
 location = \case
+  Reading r -> readLocation r
+  Publishing r -> publishLocation r
+ 
+readLocation :: ReadR a -> Txt 
+readLocation = \case
+  ReadR ctx nm -> toReadRoute ctx nm
+  ListR ctx    -> toListRoute ctx
+
+publishLocation :: PublishR _role a -> Txt 
+publishLocation = \case
   CreateR ctx    -> toCreateRoute ctx
   UpdateR ctx nm -> toUpdateRoute ctx nm
-  ReadR ctx nm   -> toReadRoute ctx nm
-  ListR ctx      -> toListRoute ctx
 
-ref 
-  :: forall _role a v. 
-    ( Typeable a
-    , Readable a, Creatable _role a, Updatable _role a, Listable a
-    , HasFeatures v
-    ) => Route _role a -> v -> v
+ref :: forall _role a v. (HasFeatures v) => Route _role a -> v -> v
 ref = lref . location
 
-goto 
-  :: forall _role a. 
-    ( Typeable a
-    , Readable a, Creatable _role a, Updatable _role a, Listable a
-    ) => Route _role a -> IO ()
+readRef :: forall a v. HasFeatures v => ReadR a -> v -> v
+readRef = lref . readLocation
+
+publishRef :: forall _role a v. HasFeatures v => PublishR _role a -> v -> v
+publishRef = lref . publishLocation
+
+goto :: Route _role a -> IO ()
 goto = Router.goto . location
+
+readGoto :: ReadR a -> IO ()
+readGoto = Router.goto . readLocation
+
+publishGoto :: PublishR _role a -> IO ()
+publishGoto = Router.goto . publishLocation
 
 preload
   :: forall _role a v.
     ( Typeable a
-    , Readable a, Creatable _role a, Updatable _role a, Listable a
     , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
     , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
     , FromJSON (Product a)
     , FromJSON (Preview a)
     , HasFeatures v
     ) => Route _role a -> v -> v
-preload rt = OnMouseDown load . OnTouchStart load
+preload = \case
+  Reading r -> readPreload r
+  _ -> id
+
+readPreload 
+  :: forall a v.
+    ( Typeable a
+    , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
+    , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
+    , FromJSON (Product a)
+    , FromJSON (Preview a)
+    , HasFeatures v
+    ) => ReadR a -> v -> v
+readPreload rt = OnMouseDown load . OnTouchStart load
   where
     load _ = case rt of
       ReadR ctx nm -> 
@@ -911,6 +1007,3 @@ preload rt = OnMouseDown load . OnTouchStart load
           req Cached (readingAPI @a)
             (readListing @a) 
             ctx
-            
-      _ ->
-        pure ()
