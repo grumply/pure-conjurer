@@ -8,11 +8,11 @@ import Pure.Conjurer.Fieldable as Export
 import Pure.Conjurer.Formable as Export
 import Pure.Conjurer.Index as Export
 import Pure.Conjurer.Key as Export
-import Pure.Conjurer.Listable as Export
-import Pure.Conjurer.Listing as Export
+import Pure.Conjurer.Listable as Export 
 import Pure.Conjurer.Pathable as Export
 import Pure.Conjurer.Permissions as Export
 import Pure.Conjurer.Previewable as Export
+import Pure.Conjurer.Previews as Export
 import Pure.Conjurer.Producible as Export
 import Pure.Conjurer.Readable as Export
 import Pure.Conjurer.Resource as Export
@@ -20,10 +20,12 @@ import Pure.Conjurer.Rootable as Export
 import Pure.Conjurer.Slug as Export
 import Pure.Conjurer.Updatable as Export
 
+
 import Pure.Data.JSON (ToJSON(..),FromJSON(..),encodeBS,decodeBS)
 import Pure.Data.Txt as Txt
-import Pure.Elm.Component (View,HasFeatures,pattern OnTouchStart,pattern OnMouseDown,Theme(..),pattern Themed,(|>),(<|),pattern Div)
-import Pure.Router as Router (Routing,goto,lref)
+import Pure.Elm.Application (storeScrollPosition)
+import Pure.Elm.Component (View,HasFeatures,pattern OnClickWith,intercept,pattern Href,pattern OnTouchStart,pattern OnMouseDown,Theme(..),pattern Themed,(|>),(<|),pattern Div)
+import Pure.Router as Router (Routing,goto)
 import Pure.Sorcerer as Sorcerer hiding (Read,pattern Update)
 import qualified Pure.Sorcerer as Sorcerer
 import Pure.WebSocket as WS hiding (Index,identify)
@@ -64,7 +66,7 @@ db =
   , listener @(IndexMsg a) @(Index a)
   , listener @(ProductMsg a) @(Product a)
   , listener @(PreviewMsg a) @(Preview a)
-  , listener @(ListingMsg a) @(Listing a)
+  , listener @(PreviewsMsg a) @(Previews a)
   ]
 
 tryCreate
@@ -91,10 +93,10 @@ tryCreate Callbacks {..} ctx name a0 = do
           (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
           (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
           Sorcerer.write (IndexStream @a) (ResourceAdded ctx name)
-          (Sorcerer.Update (Listing (listing :: [(Name a,Preview a)]))) <- 
-            Sorcerer.transact (ListingStream ctx) (SetPreviewItem name pre)
+          (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
+            Sorcerer.transact (PreviewsStream ctx) (SetPreviewItem name pre)
           onCreate ctx name new pro pre
-          pure (Just (pro,pre,listing))
+          pure (Just (pro,pre,previews))
         _ ->
           pure Nothing
 
@@ -121,10 +123,10 @@ tryUpdate Callbacks {..} ctx name a0 = do
           pre <- preview new pro
           (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
           (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
-          (Sorcerer.Update (Listing (listing :: [(Name a,Preview a)]))) <- 
-            Sorcerer.transact (ListingStream ctx) (SetPreviewItem name pre)
+          (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
+            Sorcerer.transact (PreviewsStream ctx) (SetPreviewItem name pre)
           onUpdate ctx name new pro pre
-          pure (Just (pro,pre,listing))
+          pure (Just (pro,pre,previews))
         _ ->
           pure Nothing
 
@@ -144,10 +146,10 @@ tryDelete Callbacks {..} ctx name =
     Deleted r -> do
       Deleted pre <- Sorcerer.observe (PreviewStream ctx name) DeletePreview
       Deleted pro <- Sorcerer.observe (ProductStream ctx name) DeleteProduct
-      (Sorcerer.Update (Listing (listing :: [(Name a,Preview a)]))) <- 
-        Sorcerer.transact (ListingStream ctx) (DeletePreviewItem name)
+      (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
+        Sorcerer.transact (PreviewsStream ctx) (DeletePreviewItem name)
       onDelete ctx name r pro pre
-      pure (Just (pro,pre,listing))
+      pure (Just (pro,pre,previews))
     _ -> do
       pure Nothing
 
@@ -186,8 +188,8 @@ tryReadListing
     , ToJSON (Name a), FromJSON (Name a), Eq (Name a)
     ) => Context a -> IO (Maybe [(Name a,Preview a)])
 tryReadListing ctx =
-  Sorcerer.read (ListingStream ctx) >>= \case
-    Just (Listing ps) -> pure (Just ps)
+  Sorcerer.read (PreviewsStream ctx) >>= \case
+    Just (Previews ps) -> pure (Just ps)
     Nothing -> pure Nothing
 
 --------------------------------------------------------------------------------
@@ -461,8 +463,8 @@ cache = do
 
   for_ cs $ \ctx -> do
 
-    Sorcerer.read (ListingStream ctx) >>= \case
-      Just (Listing nps :: Listing resource) -> cacheListing ctx nps
+    Sorcerer.read (PreviewsStream ctx) >>= \case
+      Just (Previews nps :: Previews resource) -> cacheListing ctx nps
       _ -> pure ()
 
 cacheProduct 
@@ -532,7 +534,7 @@ cachePreview
 cachePreview ctx nm (encodeBS . Just -> !pre) = do
   -- Don't look; I'm hideous!
   let ty = typeOf (undefined :: ReadPreview resource)
-  atomicModifyIORef' (previews conjurerCache) $ \m -> 
+  atomicModifyIORef' (Pure.Conjurer.previews conjurerCache) $ \m -> 
     case Map.lookup ty m of
       Nothing -> unsafePerformIO do
         pre_ <- newIORef pre
@@ -557,7 +559,7 @@ deletePreview
 deletePreview ctx nm = do
    -- Don't look; I'm hideous!
   let ty = typeOf (undefined :: ReadPreview resource)
-  atomicModifyIORef' (previews conjurerCache) $ \m -> 
+  atomicModifyIORef' (Pure.Conjurer.previews conjurerCache) $ \m -> 
     case Map.lookup ty m of
       Nothing -> (m,())
       Just rm_ -> unsafePerformIO do
@@ -572,7 +574,7 @@ tryReadPreviewFromCache
     ) => Context resource -> Name resource -> IO (Maybe ByteString)
 tryReadPreviewFromCache ctx nm = do
   let ty = typeOf (undefined :: ReadPreview resource)
-  ps <- readIORef (previews conjurerCache) 
+  ps <- readIORef (Pure.Conjurer.previews conjurerCache) 
   case Map.lookup ty ps of
     Nothing -> pure Nothing
     Just pros_ -> do
@@ -954,22 +956,40 @@ publishLocation = \case
   UpdateR ctx nm -> toUpdateRoute ctx nm
 
 ref :: forall _role a v. (HasFeatures v) => Route _role a -> v -> v
-ref = lref . location
+ref = go . location
+  where
+    go t a = OnClickWith intercept (\_ -> storeScrollPosition >> Router.goto t) (Href t a) 
 
 readRef :: forall a v. HasFeatures v => ReadR a -> v -> v
-readRef = lref . readLocation
+readRef = go . readLocation
+  where 
+    go t a = OnClickWith intercept (\_ -> storeScrollPosition >> Router.goto t) (Href t a) 
 
 publishRef :: forall _role a v. HasFeatures v => PublishR _role a -> v -> v
-publishRef = lref . publishLocation
+publishRef = go . publishLocation
+  where
+    go t a = OnClickWith intercept (\_ -> storeScrollPosition >> Router.goto t) (Href t a) 
 
 goto :: Route _role a -> IO ()
-goto = Router.goto . location
+goto = go . location
+  where
+    go r = do
+      storeScrollPosition
+      Router.goto r
 
 readGoto :: ReadR a -> IO ()
-readGoto = Router.goto . readLocation
+readGoto = go . readLocation
+  where
+    go r = do
+      storeScrollPosition
+      Router.goto r
 
 publishGoto :: PublishR _role a -> IO ()
-publishGoto = Router.goto . publishLocation
+publishGoto = go . publishLocation
+  where
+    go r = do
+      storeScrollPosition
+      Router.goto r
 
 preload
   :: forall _role a v.

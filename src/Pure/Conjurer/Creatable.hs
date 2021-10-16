@@ -1,4 +1,4 @@
-module Pure.Conjurer.Creatable (Creatable(..)) where
+module Pure.Conjurer.Creatable (Creatable(..),Creating) where
 
 import Pure.Conjurer.API
 import Pure.Conjurer.Context
@@ -9,8 +9,9 @@ import Pure.Conjurer.Previewable
 import Pure.Conjurer.Readable
 import Pure.Conjurer.Resource
 import Pure.Conjurer.Rootable
+import Pure.Conjurer.Updatable (Previewing)
 
-import Pure.Auth (authorize)
+import Pure.Auth (Access(..),authorize,defaultOnRegistered)
 import Pure.Data.Default
 import Pure.Data.JSON
 import Pure.Elm.Component hiding (root)
@@ -20,6 +21,10 @@ import Pure.Sync
 import Pure.WebSocket
 
 import Data.Typeable
+
+
+data Creating
+instance Theme Creating
 
 class Creatable _role resource | resource -> _role where
   createRoute :: (Context resource -> rt) -> Routing rt ()
@@ -45,6 +50,7 @@ class Creatable _role resource | resource -> _role where
   default toCreate 
     :: ( Typeable resource, Typeable _role
        , Readable resource
+       , Theme resource
        , ToJSON (Resource resource), FromJSON (Resource resource), Default (Resource resource)
        , ToJSON (Context resource), FromJSON (Context resource)
        , FromJSON (Name resource)
@@ -55,7 +61,7 @@ class Creatable _role resource | resource -> _role where
        , Component (Product resource)
        ) => WebSocket -> Context resource -> View
   toCreate ws ctx =
-    authorize @_role $ maybe "Not Authorized" $ \_ -> 
+    authorize @_role (Access ws id defaultOnRegistered) $ \_ -> 
       let 
         onPreview resource = do
           r <- sync do
@@ -65,7 +71,7 @@ class Creatable _role resource | resource -> _role where
           case r of
             Nothing -> pure "Failed to preview."
             Just (ctx,nm,pre,pro,res) -> pure do
-              Div <||>
+              Div <| Themed @resource . Themed @Previewing |>
                 [ run pre
                 , run pro
                 ]
@@ -77,5 +83,7 @@ class Creatable _role resource | resource -> _role where
               (ctx,resource)
           for_ mi (Router.goto . toReadRoute ctx)
       in 
-        form onSubmit onPreview def
+        Div <| Themed @resource . Themed @Creating |>
+          [ form onSubmit onPreview def
+          ]
 

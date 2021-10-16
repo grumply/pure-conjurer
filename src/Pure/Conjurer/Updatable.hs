@@ -1,4 +1,4 @@
-module Pure.Conjurer.Updatable (Updatable(..),cachingToUpdate) where
+module Pure.Conjurer.Updatable (Updatable(..),Previewing,Updating,cachingToUpdate) where
 
 import Pure.Conjurer.API
 import Pure.Conjurer.Context
@@ -10,9 +10,9 @@ import Pure.Conjurer.Readable
 import Pure.Conjurer.Resource
 import Pure.Conjurer.Rootable
 
-import Pure.Auth (authorize)
+import Pure.Auth (Access(..),authorize,defaultOnRegistered)
 import Pure.Data.JSON
-import Pure.Elm.Component hiding (root)
+import Pure.Elm.Component hiding (root,Update)
 import Pure.Maybe
 import Pure.Router as Router
 import Pure.Sync
@@ -20,6 +20,11 @@ import Pure.WebSocket
 import Pure.WebSocket.Cache
 
 import Data.Typeable
+
+data Updating
+data Previewing
+instance Theme Updating
+instance Theme Previewing
 
 class Updatable _role resource | resource -> _role where
   updateRoute :: (Context resource -> Name resource -> rt) -> Routing rt ()
@@ -45,6 +50,7 @@ class Updatable _role resource | resource -> _role where
   toUpdate :: WebSocket -> Context resource -> Name resource -> View
   default toUpdate 
     :: ( Typeable resource, Typeable _role
+       , Theme resource
        , ToJSON (Context resource), FromJSON (Context resource)
        , ToJSON (Name resource), FromJSON (Name resource)
        , ToJSON (Resource resource), FromJSON (Resource resource)
@@ -54,17 +60,18 @@ class Updatable _role resource | resource -> _role where
        , Formable (Resource resource)
        , Component (Preview resource)
        , Component (Product resource)
+       , Eq (Context resource)
+       , Eq (Name resource)
        ) => WebSocket -> Context resource -> Name resource -> View
   toUpdate ws ctx nm =
-    authorize @_role $ maybe "Not Authorized" $ \_ ->
-      producing producer (consuming consumer)
+    authorize @_role (Access ws id defaultOnRegistered) $ \_ ->
+      producingKeyed (ctx,nm) producer (\_ -> consuming consumer)
     where
-      producer = sync do 
+      producer = sync .
         request (publishingAPI @resource) ws 
           (readResource @resource) 
-          (ctx,nm)
 
-      consumer = maybe "Not Found" (form onSubmit onPreview) 
+      consumer = maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Updating |> [ form onSubmit onPreview x ]) 
       
       onPreview resource = do
         r <- sync do
@@ -74,7 +81,7 @@ class Updatable _role resource | resource -> _role where
         case r of
           Nothing -> pure "Failed to preview."
           Just (ctx,nm,pre,pro,res) -> pure do
-            Div <||>
+            Div <| Themed @resource . Themed @Previewing |>
               [ run pre
               , run pro
               ]
@@ -92,6 +99,7 @@ class Updatable _role resource | resource -> _role where
 cachingToUpdate 
   :: forall _role resource.
     ( Typeable resource, Typeable _role
+    , Theme resource
     , ToJSON (Context resource), FromJSON (Context resource), Ord (Context resource)
     , ToJSON (Name resource), FromJSON (Name resource), Ord (Name resource)
     , ToJSON (Resource resource), FromJSON (Resource resource)
@@ -101,17 +109,18 @@ cachingToUpdate
     , Formable (Resource resource)
     , Component (Preview resource)
     , Component (Product resource)
+    , Eq (Context resource)
+    , Eq (Name resource)
     ) => WebSocket -> Context resource -> Name resource -> View
 cachingToUpdate ws ctx nm =
-  authorize @_role $ maybe "Not Authorized" $ \_ ->
-    producing producer (consuming consumer)
+  authorize @_role (Access ws id defaultOnRegistered) $ \_ ->
+    producingKeyed (ctx,nm) producer (\_ -> consuming consumer)
   where
-    producer = sync do 
+    producer = sync .
       request (publishingAPI @resource) ws 
         (readResource @resource) 
-        (ctx,nm)
 
-    consumer = maybe "Not Found" (form onSubmit onPreview) 
+    consumer = maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Updating |> [ form onSubmit onPreview x ]) 
     
     onPreview resource = do
       r <- sync do
@@ -121,7 +130,7 @@ cachingToUpdate ws ctx nm =
       case r of
         Nothing -> pure "Failed to preview."
         Just (ctx,nm,pre,pro,res) -> pure do
-          Div <||>
+          Div <| Themed @resource . Themed @Previewing |>
             [ run pre
             , run pro
             ]

@@ -49,10 +49,10 @@ library
     Pure.Conjurer.Index
     Pure.Conjurer.Listable
     Pure.Conjurer.Key
-    Pure.Conjurer.Listing
     Pure.Conjurer.Pathable
     Pure.Conjurer.Permissions
     Pure.Conjurer.Previewable
+    Pure.Conjurer.Previews
     Pure.Conjurer.Producible
     Pure.Conjurer.Readable
     Pure.Conjurer.Resource
