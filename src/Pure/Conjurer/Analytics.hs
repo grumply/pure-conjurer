@@ -137,7 +137,7 @@ recordSessionUser sid un = do
 recordRead 
   :: forall a. 
     ( Typeable a
-    , Readable a
+    , Routable a
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     ) => SessionId -> Context a -> Name a -> IO ()
@@ -156,7 +156,7 @@ recordSessionEnd sid = do
 addAnalytics 
   :: forall a.
     ( Typeable a
-    , Readable a
+    , Routable a
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     )  => SessionId -> Callbacks a -> Callbacks a

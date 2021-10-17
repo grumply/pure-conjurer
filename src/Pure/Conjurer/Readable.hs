@@ -24,25 +24,6 @@ data Reading
 instance Theme Reading
 
 class Readable resource where
-  readRoute :: (Context resource -> Name resource -> rt) -> Routing rt ()
-  default readRoute 
-    :: ( Rootable resource, Pathable (Context resource), Pathable (Name resource)
-       ) => (Context resource -> Name resource -> rt) -> Routing rt ()
-  readRoute f =
-    void do
-      path (root @resource) do
-        mctx <- fromPath
-        mnm  <- fromPath
-        case (,) <$> mctx <*> mnm of
-          Just (ctx,nm) -> dispatch (f ctx nm)
-          Nothing       -> continue
-
-  toReadRoute :: Context resource -> Name resource -> Txt
-  default toReadRoute 
-    :: ( Rootable resource, Pathable (Context resource), Pathable (Name resource)
-       ) => Context resource -> Name resource -> Txt
-  toReadRoute ctx nm = root @resource <> toPath ctx <> toPath nm
-
   toRead :: WebSocket -> Context resource -> Name resource -> View
   default toRead 
     :: ( Typeable resource

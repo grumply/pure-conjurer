@@ -3,12 +3,13 @@ module Pure.Conjurer.Creatable (Creatable(..),Creating) where
 import Pure.Conjurer.API
 import Pure.Conjurer.Context
 import Pure.Conjurer.Formable
+import Pure.Conjurer.Name
 import Pure.Conjurer.Pathable
 import Pure.Conjurer.Producible
 import Pure.Conjurer.Previewable
-import Pure.Conjurer.Readable
 import Pure.Conjurer.Resource
 import Pure.Conjurer.Rootable
+import Pure.Conjurer.Routable
 import Pure.Conjurer.Updatable (Previewing)
 
 import Pure.Auth (Access(..),authorize,defaultOnRegistered)
@@ -27,29 +28,10 @@ data Creating
 instance Theme Creating
 
 class Creatable _role resource | resource -> _role where
-  createRoute :: (Context resource -> rt) -> Routing rt ()
-  default createRoute 
-    :: ( Rootable resource, Pathable (Context resource)
-       ) => (Context resource -> rt) -> Routing rt ()
-  createRoute f =
-    void do
-      path (root @resource) do
-        path "/new" do
-          mctx <- fromPath
-          case mctx of
-            Just ctx -> dispatch (f ctx)
-            Nothing  -> continue
-
-  toCreateRoute :: Context resource -> Txt
-  default toCreateRoute 
-    :: ( Rootable resource, Pathable (Context resource)
-       ) => Context resource -> Txt
-  toCreateRoute ctx = root @resource <> "/new" <> toPath ctx
-
   toCreate :: WebSocket -> Context resource -> View
   default toCreate 
     :: ( Typeable resource, Typeable _role
-       , Readable resource
+       , Routable resource
        , Theme resource
        , ToJSON (Resource resource), FromJSON (Resource resource), Default (Resource resource)
        , ToJSON (Context resource), FromJSON (Context resource)

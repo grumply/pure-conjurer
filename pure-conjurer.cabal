@@ -49,6 +49,7 @@ library
     Pure.Conjurer.Index
     Pure.Conjurer.Listable
     Pure.Conjurer.Key
+    Pure.Conjurer.Name
     Pure.Conjurer.Pathable
     Pure.Conjurer.Permissions
     Pure.Conjurer.Previewable
@@ -57,6 +58,7 @@ library
     Pure.Conjurer.Readable
     Pure.Conjurer.Resource
     Pure.Conjurer.Rootable
+    Pure.Conjurer.Routable
     Pure.Conjurer.Slug
     Pure.Conjurer.Updatable
 

@@ -5,9 +5,9 @@ import Pure.Conjurer.Context
 import Pure.Conjurer.Pathable
 import Pure.Conjurer.Previewable
 import Pure.Conjurer.Producible
-import Pure.Conjurer.Readable
 import Pure.Conjurer.Resource
 import Pure.Conjurer.Rootable
+import Pure.Conjurer.Routable
 
 import Pure.Data.JSON
 import Pure.Elm.Application (storeScrollPosition)
@@ -25,31 +25,12 @@ data Listing
 instance Theme Listing
 
 class Listable resource where
-  listRoute :: (Context resource -> rt) -> Routing rt ()
-  default listRoute 
-    :: ( Rootable resource, Pathable (Context resource)
-       ) => (Context resource -> rt) -> Routing rt ()
-  listRoute f =
-    void do
-      path (root @resource) do
-        path "/list" do
-          mctx <- fromPath 
-          case mctx of
-            Just ctx -> dispatch (f ctx)
-            Nothing  -> continue
-
-  toListRoute :: Context resource -> Txt
-  default toListRoute 
-    :: ( Rootable resource, Pathable (Context resource)
-       ) => Context resource -> Txt
-  toListRoute ctx = root @resource <> "/list" <> toPath ctx
-
   toList :: WebSocket -> Context resource -> View
   default toList 
     :: ( Typeable resource
+       , Routable resource
        , Theme resource
        , Component (Preview resource)
-       , Readable resource
        , FromJSON (Preview resource)
        , ToJSON (Context resource), FromJSON (Context resource)
        , ToJSON (Name resource), FromJSON (Name resource)
@@ -76,9 +57,9 @@ type ShouldPreloadPreviews = Bool
 cachingToList 
   :: forall resource.
     ( Typeable resource
+    , Routable resource
     , Theme resource
     , Component (Preview resource)
-    , Readable resource
     , FromJSON (Preview resource)
     , ToJSON (Context resource), FromJSON (Context resource), Ord (Context resource)
     , ToJSON (Name resource), FromJSON (Name resource), Ord (Name resource)

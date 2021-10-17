@@ -1,6 +1,7 @@
 module Pure.Conjurer.Resource (Stream(..),Resource(..),ResourceMsg(..),Processable(..),Name(..),Nameable(..)) where
 
 import Pure.Conjurer.Context
+import Pure.Conjurer.Name
 import Pure.Conjurer.Pathable
 
 import Pure.Data.JSON
@@ -13,8 +14,6 @@ import Data.Typeable
 import GHC.Generics
 
 data family Resource a :: *
-
-data family Name a :: *
 
 class Nameable a where
   toName :: Resource a -> Name a

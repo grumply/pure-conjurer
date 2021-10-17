@@ -9,6 +9,7 @@ import Pure.Conjurer.Formable as Export
 import Pure.Conjurer.Index as Export
 import Pure.Conjurer.Key as Export
 import Pure.Conjurer.Listable as Export 
+import Pure.Conjurer.Name as Export 
 import Pure.Conjurer.Pathable as Export
 import Pure.Conjurer.Permissions as Export
 import Pure.Conjurer.Previewable as Export
@@ -17,9 +18,9 @@ import Pure.Conjurer.Producible as Export
 import Pure.Conjurer.Readable as Export
 import Pure.Conjurer.Resource as Export
 import Pure.Conjurer.Rootable as Export
+import Pure.Conjurer.Routable as Export 
 import Pure.Conjurer.Slug as Export
 import Pure.Conjurer.Updatable as Export
-
 
 import Pure.Data.JSON (ToJSON(..),FromJSON(..),encodeBS,decodeBS)
 import Pure.Data.Txt as Txt
@@ -823,74 +824,21 @@ customReplyRaw = replyRaw
 
 --------------------------------------------------------------------------------
 
-data ReadR a 
-  = Readable a => ReadR (Context a) (Name a)
-  | Listable a => ListR (Context a)
-    
-deriving instance (Ord (Context a), Ord (Name a)) => Ord (ReadR a)
-deriving instance (Eq (Context a), Eq (Name a)) => Eq (ReadR a)
-deriving instance (Show (Context a), Show (Name a)) => Show (ReadR a)
-instance (ToJSON (Context a), ToJSON (Name a)) => ToJSON (ReadR a) where
-  toJSON (ReadR c n) = toJSON ("ReadR" :: Txt,(c,n))
-  toJSON (ListR c)   = toJSON ("ListR" :: Txt,c)
-instance (Readable a, Listable a, FromJSON (Context a), FromJSON (Name a)) => FromJSON (ReadR a) where
-  parseJSON o = do
-    (x :: Txt,v) <- parseJSON o
-    case x of
-      "ReadR" -> do
-        (c,n) <- parseJSON v
-        pure (ReadR c n)
-      "ListR" -> do
-        c <- parseJSON v
-        pure (ListR c)
-      _ -> 
-        mzero
+data Route a 
+  = ReadR (Context a) (Name a)
+  | ListR (Context a)
+  | CreateR (Context a)
+  | UpdateR (Context a) (Name a)
 
-data PublishR _role a
-  = Creatable _role a => CreateR (Context a)
-  | Updatable _role a => UpdateR (Context a) (Name a)
-
-deriving instance (Ord (Context a), Ord (Name a)) => Ord (PublishR _role a)
-deriving instance (Eq (Context a), Eq (Name a)) => Eq (PublishR _role a)
-deriving instance (Show (Context a), Show (Name a)) => Show (PublishR _role a)
-instance (ToJSON (Context a), ToJSON (Name a)) => ToJSON (PublishR _role a) where
-  toJSON (CreateR c)   = toJSON ("CreateR" :: Txt,c)
-  toJSON (UpdateR c n) = toJSON ("UpdateR" :: Txt,(c,n))
-instance (Updatable _role a, Creatable _role a, FromJSON (Context a), FromJSON (Name a)) => FromJSON (PublishR _role a) where
-  parseJSON o = do
-    (x :: Txt,v) <- parseJSON o
-    case x of
-      "CreateR" -> do
-        c <- parseJSON v
-        pure (CreateR c)
-      "UpdateR" -> do
-        (c,n) <- parseJSON v
-        pure (UpdateR c n)
-      _ ->
-        mzero
-
-data Route _role a
-  = Reading (ReadR a)
-  | Publishing (PublishR _role a)
-
-deriving instance (Ord (Context a), Ord (Name a)) => Ord (Route _role a)
-deriving instance (Eq (Context a), Eq (Name a)) => Eq (Route _role a)
-deriving instance (Show (Context a), Show (Name a)) => Show (Route _role a)
-instance (ToJSON (ReadR a),ToJSON (PublishR _role a)) => ToJSON (Route _role a) where
-  toJSON (Reading r) = toJSON ("Reading" :: Txt,r)
-  toJSON (Publishing r) = toJSON ("Publishing" :: Txt,r)
-instance (FromJSON (ReadR a),FromJSON (PublishR _role a)) => FromJSON (Route _role a) where
-  parseJSON o = do
-    (x :: Txt,v) <- parseJSON o
-    case x of
-      "Reading" -> do
-        r <- parseJSON v
-        pure (Reading r)
-      "Publishing" -> do
-        r <- parseJSON v
-        pure (Publishing r)
-      _ ->
-        mzero
+{- 
+-- I have a feeling these are expensive.
+deriving instance (Generic (Context a), Generic (Name a)) => Generic (Route a)
+deriving instance (Ord (Context a), Ord (Name a)) => Ord (Route a)
+deriving instance (Eq (Context a), Eq (Name a)) => Eq (Route a)
+deriving instance (Show (Context a), Show (Name a)) => Show (Route a)
+deriving instance (ToJSON (Context a),ToJSON (Name a)) => ToJSON (Route a)
+deriving instance (FromJSON (Context a),FromJSON (Name a)) => FromJSON (Route a)
+-}
 
 data Pages_ = Create | Read | Update | List
 instance Theme Create
@@ -898,113 +846,48 @@ instance Theme Update
 instance Theme Read
 instance Theme List
 
-pages :: forall _role a. Typeable a => WebSocket -> Route _role a -> View
+pages :: (Creatable _role a, Listable a, Readable a, Updatable _role a) => WebSocket -> Route a -> View
 pages ws = \case
-  Reading r -> readPages ws r
-  Publishing r -> publishPages ws r
-  
-readPages :: WebSocket -> ReadR a -> View
-readPages ws = \case
-  ReadR ctx nm -> Div <| Themed @Read |> [ toRead ws ctx nm ]
-  ListR ctx    -> Div <| Themed @List |> [ Export.toList ws ctx ]
-  
-publishPages :: WebSocket -> PublishR _role a -> View
-publishPages ws = \case 
+  ReadR ctx nm   -> Div <| Themed @Read |> [ toRead ws ctx nm ]
+  ListR ctx      -> Div <| Themed @List |> [ Export.toList ws ctx ]
   CreateR ctx    -> Div <| Themed @Create |> [ toCreate ws ctx ]
   UpdateR ctx nm -> Div <| Themed @Update |> [ toUpdate ws ctx nm ]
 
-routes 
-  :: forall _role a route. 
-    ( Typeable a
-    , Readable a, Creatable _role a, Updatable _role a, Listable a 
-    ) => (Route _role a -> route) -> Routing route ()
+readPages :: (Readable a, Listable a) => WebSocket -> Route a -> View
+readPages ws = \case
+  ReadR ctx nm   -> Div <| Themed @Read |> [ toRead ws ctx nm ]
+  UpdateR ctx nm -> Div <| Themed @Read |> [ toRead ws ctx nm ]
+  ListR ctx      -> Div <| Themed @List |> [ Export.toList ws ctx ]
+  CreateR ctx    -> Div <| Themed @List |> [ Export.toList ws ctx ]
+
+routes :: forall a route. (Typeable a, Routable a) 
+       => (Route a -> route) -> Routing route ()
 routes lift = do
-  publishRoutes (lift . Publishing)
-  readRoutes (lift . Reading)
-  
-readRoutes
-  :: forall a route. 
-    ( Typeable a
-    , Readable a, Listable a 
-    ) => (ReadR a -> route) -> Routing route ()
-readRoutes lift = do    
   listRoute (\ctx -> lift (ListR ctx))
-  readRoute (\ctx nm -> lift (ReadR ctx nm))
-    
-publishRoutes 
-  :: forall _role a route. 
-    ( Typeable a
-    , Readable a, Creatable _role a, Updatable _role a, Listable a 
-    ) => (PublishR _role a -> route) -> Routing route ()
-publishRoutes lift = do
   updateRoute (\ctx nm -> lift (UpdateR ctx nm))
   createRoute (\ctx -> lift (CreateR ctx))
+  readRoute (\ctx nm -> lift (ReadR ctx nm))
 
-location :: Route _role a -> Txt
+location :: Routable a => Route a -> Txt
 location = \case
-  Reading r -> readLocation r
-  Publishing r -> publishLocation r
- 
-readLocation :: ReadR a -> Txt 
-readLocation = \case
-  ReadR ctx nm -> toReadRoute ctx nm
-  ListR ctx    -> toListRoute ctx
-
-publishLocation :: PublishR _role a -> Txt 
-publishLocation = \case
+  ReadR ctx nm   -> toReadRoute ctx nm
+  ListR ctx      -> toListRoute ctx
   CreateR ctx    -> toCreateRoute ctx
   UpdateR ctx nm -> toUpdateRoute ctx nm
 
-ref :: forall _role a v. (HasFeatures v) => Route _role a -> v -> v
+ref :: (Routable a, HasFeatures v) => Route a -> v -> v
 ref = go . location
   where
     go t a = OnClickWith intercept (\_ -> storeScrollPosition >> Router.goto t) (Href t a) 
 
-readRef :: forall a v. HasFeatures v => ReadR a -> v -> v
-readRef = go . readLocation
-  where 
-    go t a = OnClickWith intercept (\_ -> storeScrollPosition >> Router.goto t) (Href t a) 
-
-publishRef :: forall _role a v. HasFeatures v => PublishR _role a -> v -> v
-publishRef = go . publishLocation
-  where
-    go t a = OnClickWith intercept (\_ -> storeScrollPosition >> Router.goto t) (Href t a) 
-
-goto :: Route _role a -> IO ()
+goto :: Routable a => Route a -> IO ()
 goto = go . location
   where
     go r = do
       storeScrollPosition
       Router.goto r
 
-readGoto :: ReadR a -> IO ()
-readGoto = go . readLocation
-  where
-    go r = do
-      storeScrollPosition
-      Router.goto r
-
-publishGoto :: PublishR _role a -> IO ()
-publishGoto = go . publishLocation
-  where
-    go r = do
-      storeScrollPosition
-      Router.goto r
-
 preload
-  :: forall _role a v.
-    ( Typeable a
-    , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
-    , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
-    , FromJSON (Product a)
-    , FromJSON (Preview a)
-    , HasFeatures v
-    ) => Route _role a -> v -> v
-preload = \case
-  Reading r -> readPreload r
-  _ -> id
-
-readPreload 
   :: forall a v.
     ( Typeable a
     , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
@@ -1012,8 +895,8 @@ readPreload
     , FromJSON (Product a)
     , FromJSON (Preview a)
     , HasFeatures v
-    ) => ReadR a -> v -> v
-readPreload rt = OnMouseDown load . OnTouchStart load
+    ) => Route a -> v -> v
+preload rt = OnMouseDown load . OnTouchStart load
   where
     load _ = case rt of
       ReadR ctx nm -> 
@@ -1027,3 +910,6 @@ readPreload rt = OnMouseDown load . OnTouchStart load
           req Cached (readingAPI @a)
             (readListing @a) 
             ctx
+        
+      _ ->
+        pure ()
