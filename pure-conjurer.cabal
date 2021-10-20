@@ -25,6 +25,7 @@ library
     , pure-json
     , pure-marker
     , pure-maybe
+    , pure-render
     , pure-time
     , pure-txt
     , pure-router
@@ -36,6 +37,8 @@ library
     , containers
     , hashable
     , text
+    , directory
+    , filepath
 
   exposed-modules:
     Pure.Conjurer

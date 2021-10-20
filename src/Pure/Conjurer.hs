@@ -23,9 +23,10 @@ import Pure.Conjurer.Slug as Export
 import Pure.Conjurer.Updatable as Export
 
 import Pure.Data.JSON (ToJSON(..),FromJSON(..),encodeBS,decodeBS)
+import Pure.Data.Render ()
 import Pure.Data.Txt as Txt
 import Pure.Elm.Application (storeScrollPosition)
-import Pure.Elm.Component (View,HasFeatures,pattern OnClickWith,intercept,pattern Href,pattern OnTouchStart,pattern OnMouseDown,Theme(..),pattern Themed,(|>),(<|),pattern Div)
+import Pure.Elm.Component (View,HasFeatures,pattern OnClickWith,intercept,pattern Href,pattern OnTouchStart,pattern OnMouseDown,Theme(..),pattern Themed,(|>),(<|),pattern Div,Component(run))
 import Pure.Router as Router (Routing,goto)
 import Pure.Sorcerer as Sorcerer hiding (Read,pattern Update)
 import qualified Pure.Sorcerer as Sorcerer
@@ -35,6 +36,8 @@ import Pure.WebSocket.Cache
 import Data.ByteString.Lazy (ByteString)
 import Data.Map.Strict as Map
 import Data.Set as Set
+import System.Directory (createDirectoryIfMissing)
+import System.FilePath (takeDirectory)
 
 import Control.Concurrent
 import Control.Monad
@@ -840,7 +843,8 @@ deriving instance (ToJSON (Context a),ToJSON (Name a)) => ToJSON (Route a)
 deriving instance (FromJSON (Context a),FromJSON (Name a)) => FromJSON (Route a)
 -}
 
-data Pages_ = Create | Read | Update | List
+data Conjured = Create | Read | Update | List
+instance Theme Conjured
 instance Theme Create
 instance Theme Update
 instance Theme Read
@@ -848,17 +852,17 @@ instance Theme List
 
 pages :: (Creatable _role a, Listable a, Readable a, Updatable _role a) => WebSocket -> Route a -> View
 pages ws = \case
-  ReadR ctx nm   -> Div <| Themed @Read |> [ toRead ws ctx nm ]
-  ListR ctx      -> Div <| Themed @List |> [ Export.toList ws ctx ]
-  CreateR ctx    -> Div <| Themed @Create |> [ toCreate ws ctx ]
-  UpdateR ctx nm -> Div <| Themed @Update |> [ toUpdate ws ctx nm ]
+  ReadR ctx nm   -> Div <| Themed @Conjured . Themed @Read |> [ toRead ws ctx nm ]
+  ListR ctx      -> Div <| Themed @Conjured . Themed @List |> [ Export.toList ws ctx ]
+  CreateR ctx    -> Div <| Themed @Conjured . Themed @Create |> [ toCreate ws ctx ]
+  UpdateR ctx nm -> Div <| Themed @Conjured . Themed @Update |> [ toUpdate ws ctx nm ]
 
 readPages :: (Readable a, Listable a) => WebSocket -> Route a -> View
 readPages ws = \case
-  ReadR ctx nm   -> Div <| Themed @Read |> [ toRead ws ctx nm ]
-  UpdateR ctx nm -> Div <| Themed @Read |> [ toRead ws ctx nm ]
-  ListR ctx      -> Div <| Themed @List |> [ Export.toList ws ctx ]
-  CreateR ctx    -> Div <| Themed @List |> [ Export.toList ws ctx ]
+  ReadR ctx nm   -> Div <| Themed @Conjured . Themed @Read |> [ toRead ws ctx nm ]
+  UpdateR ctx nm -> Div <| Themed @Conjured . Themed @Read |> [ toRead ws ctx nm ]
+  ListR ctx      -> Div <| Themed @Conjured . Themed @List |> [ Export.toList ws ctx ]
+  CreateR ctx    -> Div <| Themed @Conjured . Themed @List |> [ Export.toList ws ctx ]
 
 routes :: forall a route. (Typeable a, Routable a) 
        => (Route a -> route) -> Routing route ()
@@ -913,3 +917,44 @@ preload rt = OnMouseDown load . OnTouchStart load
         
       _ ->
         pure ()
+
+--------------------------------------------------------------------------------
+-- A very simple static renderer. The goal is to generate content for indexing
+-- by crawlers, not to generate a static version of the site viewable by the
+-- public.
+
+generateStatic 
+  :: forall a. 
+    ( Typeable a
+    , Routable a
+    , ToJSON (Name a), FromJSON (Name a), Hashable (Name a), Pathable (Name a)
+    , ToJSON (Context a), FromJSON (Context a), Hashable (Context a), Pathable (Context a)
+    , ToJSON (Product a), FromJSON (Product a)
+    , Component (Product a)
+    ) => WebSocket -> IO ()
+generateStatic = generateStaticWith @a "dist/static/" defaultTemplate
+
+defaultTemplate :: (Component a) => a -> IO Txt
+defaultTemplate a = pure $
+  "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"></head><body>" <> toTxt (run a) <> "</body></html>"
+
+generateStaticWith 
+  :: forall a. 
+    ( Typeable a
+    , Routable a
+    , ToJSON (Name a), FromJSON (Name a), Hashable (Name a), Pathable (Name a)
+    , ToJSON (Context a), FromJSON (Context a), Hashable (Context a), Pathable (Context a)
+    , ToJSON (Product a), FromJSON (Product a)
+    ) => FilePath -> (Product a -> IO Txt) -> WebSocket -> IO ()
+generateStaticWith path template ws = do
+  Export.iterate @a $ \ctx nm -> do
+    Sorcerer.read (ProductStream ctx nm) >>= \case
+      Just pro -> do
+        page <- template pro 
+        let p = path <> fromTxt (toReadRoute ctx nm)
+        createDirectoryIfMissing True (takeDirectory p)
+        Prelude.writeFile p (fromTxt page)
+      Nothing ->
+        pure ()
+
+      
