@@ -16,12 +16,11 @@ import GHC.Generics
 data family Product a :: *
 
 class Producible a where
-  -- | WARNING: `produce` is run during preview!
-  produce :: Resource a -> IO (Product a)
-  default produce :: Typeable a => Resource a -> IO (Product a)
-  produce _ = 
+  produce :: Bool -> Resource a -> IO (Product a)
+  default produce :: Typeable a => Bool -> Resource a -> IO (Product a)
+  produce _ _ = 
     let tc = show (typeRepTyCon (typeOf (undefined :: a)))
-    in pure (error $ "Producible " <> tc <> " => produce :: Resource " <> tc <> " -> IO (Product " <> tc <> "): Not implemented.")
+    in pure (error $ "Producible " <> tc <> " => produce :: Bool -> Resource " <> tc <> " -> IO (Product " <> tc <> "): Not implemented.")
 
 data ProductMsg a
   = SetProduct (Product a)

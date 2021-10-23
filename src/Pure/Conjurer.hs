@@ -152,8 +152,8 @@ tryCreate Callbacks {..} ctx name a = do
   withLock ctx name $ do
     Sorcerer.observe (ResourceStream ctx name) (SetResource a) >>= \case
       Added (new :: Resource a) -> do
-        pro <- produce new
-        pre <- preview new pro
+        pro <- produce True new
+        pre <- preview True new pro
         (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
         (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
         Sorcerer.write (IndexStream @a) (ResourceAdded ctx name)
@@ -181,8 +181,8 @@ tryUpdate Callbacks {..} ctx name a = do
   withLock ctx name $ do
     Sorcerer.transact (ResourceStream ctx name) (SetResource a) >>= \case
       Sorcerer.Update (new :: Resource a) -> do
-        pro <- produce new 
-        pre <- preview new pro
+        pro <- produce True new 
+        pre <- preview True new pro
         (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
         (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
         (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
@@ -209,8 +209,8 @@ tryAmend Callbacks {..} ctx name a = do
   withLock ctx name $ do
     Sorcerer.transact (ResourceStream ctx name) (AmendResource a) >>= \case
       Sorcerer.Update (new :: Resource a) -> do
-        pro <- produce new
-        pre <- preview new pro
+        pro <- produce True new
+        pre <- preview True new pro
         (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
         (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
         (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
@@ -445,8 +445,8 @@ handlePreviewResource Permissions {..} callbacks = responding do
     let name = toName resource
     can <- canCreate ctx name
     if can then do
-      pro <- produce resource
-      pre <- preview resource pro
+      pro <- produce False resource
+      pre <- preview False resource pro
       pure (Just (ctx,name,pre,pro,resource))
     else
       pure Nothing
@@ -474,8 +474,8 @@ handlePreviewAmendResource Permissions {..} callbacks = responding do
         Nothing -> pure Nothing
         Just resource -> do
           let res = amend a resource
-          pro <- produce res
-          pre <- preview res pro
+          pro <- produce False res
+          pre <- preview False res pro
           pure (Just (ctx,name,pre,pro,res))
     else
       pure Nothing
