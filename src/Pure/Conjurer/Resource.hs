@@ -1,4 +1,4 @@
-module Pure.Conjurer.Resource (Stream(..),Resource(..),ResourceMsg(..),Processable(..),Name(..),Nameable(..),Amendable(..)) where
+module Pure.Conjurer.Resource (Stream(..),Resource(..),ResourceMsg(..),Name(..),Nameable(..),Amendable(..)) where
 
 import Pure.Conjurer.Context
 import Pure.Conjurer.Name
@@ -22,11 +22,6 @@ class Amendable a where
 
 class Nameable a where
   toName :: Resource a -> Name a
-
-class Typeable a => Processable a where
-  -- | WARNING: `process` is run during preview!
-  process :: Resource a -> IO (Maybe (Resource a))
-  process = pure . Just
 
 data ResourceMsg a
   = SetResource (Resource a)
