@@ -179,8 +179,8 @@ tryUpdate
     ) => Callbacks a -> Context a -> Name a -> Resource a -> IO (Maybe (Product a,Preview a,[(Name a,Preview a)]))
 tryUpdate Callbacks {..} ctx name a = do
   withLock ctx name $ do
-    Sorcerer.observe (ResourceStream ctx name) (SetResource a) >>= \case
-      Updated old (new :: Resource a) -> do
+    Sorcerer.transact (ResourceStream ctx name) (SetResource a) >>= \case
+      Sorcerer.Update (new :: Resource a) -> do
         pro <- produce new 
         pre <- preview new pro
         (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
