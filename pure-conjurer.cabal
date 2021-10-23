@@ -39,6 +39,7 @@ library
     , text
     , directory
     , filepath
+    , stm
 
   exposed-modules:
     Pure.Conjurer

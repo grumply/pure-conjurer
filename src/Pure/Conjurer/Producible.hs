@@ -16,6 +16,7 @@ import GHC.Generics
 data family Product a :: *
 
 class Producible a where
+  -- | WARNING: `produce` is run during preview!
   produce :: Resource a -> IO (Product a)
   default produce :: Typeable a => Resource a -> IO (Product a)
   produce _ = 

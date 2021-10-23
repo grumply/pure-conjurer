@@ -13,7 +13,7 @@ import Data.Typeable
 
 data CreateResource resource
 instance Identify (CreateResource resource)
-instance ( Typeable resource) => Request (CreateResource resource) where
+instance (Typeable resource) => Request (CreateResource resource) where
   type Req (CreateResource resource) = (Int,(Context resource,Resource resource))
   type Rsp (CreateResource resource) = Maybe (Name resource)
 
@@ -22,7 +22,7 @@ createResource = Proxy
 
 data ReadResource resource
 instance Identify (ReadResource resource)
-instance ( Typeable resource) => Request (ReadResource resource) where
+instance (Typeable resource) => Request (ReadResource resource) where
   type Req (ReadResource resource) = (Int,(Context resource,Name resource))
   type Rsp (ReadResource resource) = Maybe (Resource resource)
 
@@ -31,7 +31,7 @@ readResource = Proxy
 
 data UpdateResource resource
 instance Identify (UpdateResource resource)
-instance ( Typeable resource) => Request (UpdateResource resource) where
+instance (Typeable resource) => Request (UpdateResource resource) where
   type Req (UpdateResource resource) = (Int,(Context resource,Name resource,Resource resource))
   type Rsp (UpdateResource resource) = Maybe Bool
 
@@ -40,7 +40,7 @@ updateResource = Proxy
 
 data DeleteResource resource
 instance Identify (DeleteResource resource)
-instance ( Typeable resource) => Request (DeleteResource resource) where
+instance (Typeable resource) => Request (DeleteResource resource) where
   type Req (DeleteResource resource) = (Int,(Context resource,Name resource))
   type Rsp (DeleteResource resource) = Maybe Bool
 
@@ -49,16 +49,34 @@ deleteResource = Proxy
 
 data PreviewResource resource
 instance Identify (PreviewResource resource)
-instance ( Typeable resource) => Request (PreviewResource resource) where
+instance (Typeable resource) => Request (PreviewResource resource) where
   type Req (PreviewResource resource) = (Int,(Context resource,Resource resource))
   type Rsp (PreviewResource resource) = Maybe (Context resource,Name resource,Preview resource,Product resource,Resource resource)
 
 previewResource :: Proxy (PreviewResource resource)
 previewResource = Proxy
 
+data AmendResource resource
+instance Identify (AmendResource resource)
+instance (Typeable resource) => Request (AmendResource resource) where
+  type Req (AmendResource resource) = (Int,(Context resource,Name resource,Amend resource))
+  type Rsp (AmendResource resource) = Maybe Bool
+
+amendResource :: Proxy (AmendResource resource)
+amendResource = Proxy
+
+data PreviewAmendResource resource
+instance Identify (PreviewAmendResource resource)
+instance (Typeable resource) => Request (PreviewAmendResource resource) where
+  type Req (PreviewAmendResource resource) = (Int,(Context resource,Name resource,Amend resource))
+  type Rsp (PreviewAmendResource resource) = Maybe (Context resource,Name resource,Preview resource,Product resource,Resource resource)
+
+previewAmendResource :: Proxy (PreviewAmendResource resource)
+previewAmendResource = Proxy
+
 data ReadProduct resource
 instance Identify (ReadProduct resource)
-instance ( Typeable resource) => Request (ReadProduct resource) where
+instance (Typeable resource) => Request (ReadProduct resource) where
   type Req (ReadProduct resource) = (Int,(Context resource,Name resource))
   type Rsp (ReadProduct resource) = Maybe (Product resource)
 
@@ -67,7 +85,7 @@ readProduct = Proxy
 
 data ReadPreview resource
 instance Identify (ReadPreview resource)
-instance ( Typeable resource) => Request (ReadPreview resource) where
+instance (Typeable resource) => Request (ReadPreview resource) where
   type Req (ReadPreview resource) = (Int,(Context resource,Name resource))
   type Rsp (ReadPreview resource) = Maybe (Preview resource)
 
@@ -76,7 +94,7 @@ readPreview = Proxy
 
 data ReadListing resource
 instance Identify (ReadListing resource)
-instance ( Typeable resource) => Request (ReadListing resource) where
+instance (Typeable resource) => Request (ReadListing resource) where
   type Req (ReadListing resource) = (Int,Context resource)
   type Rsp (ReadListing resource) = Maybe [(Name resource,Preview resource)]
 
@@ -89,6 +107,8 @@ type PublishingAPI resource =
    , UpdateResource resource
    , DeleteResource resource
    , PreviewResource resource
+   , AmendResource resource
+   , PreviewAmendResource resource
    ]
 
 type ReadingAPI resource =
@@ -110,6 +130,8 @@ publishingAPI = api msgs reqs
        <:> updateResource @resource
        <:> deleteResource @resource
        <:> previewResource @resource
+       <:> amendResource @resource
+       <:> previewAmendResource @resource
        <:> WS.none
 
 readingAPI 
