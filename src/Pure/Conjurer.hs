@@ -130,7 +130,7 @@ withLock ctx nm f = getResourceLocks @a >>= start
 
           Nothing -> do
             q <- newTMVar =<< newTQueue
-            let rqs' = unsafeCoerce (Map.insert (ctx,nm) (unsafeCoerce rqs))
+            let rqs' = unsafeCoerce (Map.insert (ctx,nm) q (unsafeCoerce rqs))
             putTMVar rqs_ rqs'
             pure do
               f `finally` cleanup rqs_
