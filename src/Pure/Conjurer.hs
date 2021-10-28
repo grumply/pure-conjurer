@@ -526,10 +526,12 @@ handlePreviewAmendResource permissions callbacks = responding do
       Just resource -> do
         can <- canUpdate permissions ctx name
         if can then do
-          let res = amend a resource
-          pro <- produce True res
-          pre <- preview True res pro
-          pure (Just (ctx,name,pre,pro,res))
+          case amend a resource of
+            Nothing -> pure Nothing
+            Just res -> do
+              pro <- produce True res
+              pre <- preview True res pro
+              pure (Just (ctx,name,pre,pro,res))
         else
           pure Nothing
   reply response

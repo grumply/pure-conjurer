@@ -23,8 +23,8 @@ class Processable a where
 class Amendable a where
   data Amend a :: *
   -- NOTE: Resources are not processed after amend!
-  amend :: Amend a -> Resource a -> Resource a
-  amend _ = id
+  amend :: Amend a -> Resource a -> Maybe (Resource a)
+  amend _ = Just
 
 class Nameable a where
   toName :: Resource a -> Name a
@@ -71,7 +71,7 @@ instance
   ) => Aggregable (ResourceMsg a) (Resource a)
   where
     update (SetResource r) _ = Sorcerer.Update r
-    update (AmendResource c) (Just r) = Sorcerer.Update (amend c r)
+    update (AmendResource c) (Just r) = maybe Ignore Sorcerer.Update (amend c r)
     update DeleteResource (Just _) = Delete
     update _ _ = Ignore
 
