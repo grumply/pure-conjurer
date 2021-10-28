@@ -29,7 +29,7 @@ instance Pathable (Slug a) where
 -- prop> \(x :: String) -> toSlug (toTxt (toSlug (toTxt x))) == toSlug (toTxt x)
 -- 
 toSlug :: ToTxt a => a -> Slug b
-toSlug = Slug . Txt.intercalate "-" . Txt.words . Txt.toLower . Txt.map f . Txt.replace "'" "" . toTxt
-    where f c | isAlphaNum c = c | otherwise = ' '
+toSlug = Slug . Txt.dropWhileEnd (== '-') . Txt.take 255 . Txt.intercalate "-" . Txt.words . Txt.toLower . Txt.map f . Txt.replace "'" "" . toTxt
+    where f c | isAscii c && isAlphaNum c = c | otherwise = ' '
 
  

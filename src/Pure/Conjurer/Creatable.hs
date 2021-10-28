@@ -27,7 +27,7 @@ import Data.Typeable
 data Creating
 instance Theme Creating
 
-class Creatable _role resource | resource -> _role where
+class Creatable _role resource where
   toCreate :: WebSocket -> Context resource -> View
   default toCreate 
     :: ( Typeable resource, Typeable _role

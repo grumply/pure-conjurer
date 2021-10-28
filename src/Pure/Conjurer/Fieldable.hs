@@ -1,6 +1,6 @@
 module Pure.Conjurer.Fieldable where
 
-import Pure.Elm.Component
+import Pure.Elm.Component hiding (pattern Left,pattern Right)
 import Pure.Data.Txt (Txt)
 
 import GHC.Generics as G
@@ -49,3 +49,23 @@ instance Fieldable String where
        . OnInput (withInput (onchange . fromTxt)) 
        . Value (toTxt initial)
 
+instance Fieldable (Maybe Txt) where
+  field onchange initial =
+    Input 
+      <| Type "text" 
+       . OnInput (withInput (onchange . Just)) 
+       . maybe id (Value . toTxt) initial
+
+instance Fieldable (Maybe Int) where
+  field onchange initial =
+    Input 
+      <| Type "number" 
+       . OnInput (withInput (maybe def (onchange . Just) . readMaybe . fromTxt)) 
+       . maybe id (Value . toTxt) initial
+
+instance (Fieldable a, Fieldable b) => Fieldable (Either a b) where
+  field onchange initial =
+    either 
+      (field (onchange . Left))
+      (field (onchange . Right))
+      initial

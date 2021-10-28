@@ -26,7 +26,7 @@ data Previewing
 instance Theme Updating
 instance Theme Previewing
 
-class Updatable _role resource | resource -> _role where
+class Updatable _role resource where
   toUpdate :: WebSocket -> Context resource -> Name resource -> View
   default toUpdate 
     :: ( Typeable resource, Typeable _role
