@@ -1,4 +1,4 @@
-module Pure.Conjurer.Resource (Stream(..),Resource(..),ResourceMsg(..),Name(..),Nameable(..),Amendable(..)) where
+module Pure.Conjurer.Resource (Stream(..),Resource(..),ResourceMsg(..),Name(..),Nameable(..),Processable(..),Amendable(..)) where
 
 import Pure.Conjurer.Context
 import Pure.Conjurer.Name
@@ -15,8 +15,14 @@ import GHC.Generics
 
 data family Resource a :: *
 
+type Amending = Bool
+class Processable a where
+  process :: Amending -> Resource a -> IO (Maybe (Resource a))
+  process amending = pure . Just
+
 class Amendable a where
   data Amend a :: *
+  -- NOTE: Resources are not processed after amend!
   amend :: Amend a -> Resource a -> Resource a
   amend _ = id
 

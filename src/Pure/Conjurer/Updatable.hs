@@ -72,9 +72,10 @@ class Updatable _role resource where
             (updateResource @resource) 
             (ctx,nm,resource)
             
-        case did of
-          Just True -> Router.goto (toReadRoute ctx nm)
-          _         -> pure ()
+        if did then
+          Router.goto (toReadRoute ctx nm)
+        else
+          pure ()
 
 cachingToUpdate 
   :: forall _role resource.
@@ -121,13 +122,11 @@ cachingToUpdate ws ctx nm =
           (updateResource @resource) 
           (ctx,nm,resource) 
           
-      case did of
-        Just True -> do
-          req Fresh (readingAPI @resource)
-            (readProduct @resource)
-            (ctx,nm)
-          Router.goto (toReadRoute ctx nm)
-
-        _ -> 
-          pure ()
+      if did then do
+        req Fresh (readingAPI @resource)
+          (readProduct @resource)
+          (ctx,nm)
+        Router.goto (toReadRoute ctx nm)
+      else 
+        pure ()
 

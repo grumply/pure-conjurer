@@ -33,7 +33,7 @@ data UpdateResource resource
 instance Identify (UpdateResource resource)
 instance (Typeable resource) => Request (UpdateResource resource) where
   type Req (UpdateResource resource) = (Int,(Context resource,Name resource,Resource resource))
-  type Rsp (UpdateResource resource) = Maybe Bool
+  type Rsp (UpdateResource resource) = Bool
 
 updateResource :: Proxy (UpdateResource resource)
 updateResource = Proxy
@@ -42,7 +42,7 @@ data DeleteResource resource
 instance Identify (DeleteResource resource)
 instance (Typeable resource) => Request (DeleteResource resource) where
   type Req (DeleteResource resource) = (Int,(Context resource,Name resource))
-  type Rsp (DeleteResource resource) = Maybe Bool
+  type Rsp (DeleteResource resource) = Bool
 
 deleteResource :: Proxy (DeleteResource resource)
 deleteResource = Proxy
@@ -60,7 +60,7 @@ data AmendResource resource
 instance Identify (AmendResource resource)
 instance (Typeable resource) => Request (AmendResource resource) where
   type Req (AmendResource resource) = (Int,(Context resource,Name resource,Amend resource))
-  type Rsp (AmendResource resource) = Maybe Bool
+  type Rsp (AmendResource resource) = Bool
 
 amendResource :: Proxy (AmendResource resource)
 amendResource = Proxy

@@ -16,9 +16,10 @@ import GHC.Generics
 
 data family Preview a :: *
 
+type Previewing = Bool
 class Previewable a where
-  preview :: Bool -> Resource a -> Product a -> IO (Preview a)
-  default preview :: Typeable a => Bool -> Resource a -> Product a -> IO (Preview a)
+  preview :: Previewing -> Resource a -> Product a -> IO (Preview a)
+  default preview :: Typeable a => Previewing -> Resource a -> Product a -> IO (Preview a)
   preview _ _ _ =
     let 
       tc = show (typeRepTyCon (typeOf (undefined :: a)))

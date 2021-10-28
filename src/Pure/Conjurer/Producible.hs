@@ -15,9 +15,10 @@ import GHC.Generics
 
 data family Product a :: *
 
+type Previewing = Bool
 class Producible a where
-  produce :: Bool -> Resource a -> IO (Product a)
-  default produce :: Typeable a => Bool -> Resource a -> IO (Product a)
+  produce :: Previewing -> Resource a -> IO (Product a)
+  default produce :: Typeable a => Previewing -> Resource a -> IO (Product a)
   produce _ _ = 
     let tc = show (typeRepTyCon (typeOf (undefined :: a)))
     in pure (error $ "Producible " <> tc <> " => produce :: Bool -> Resource " <> tc <> " -> IO (Product " <> tc <> "): Not implemented.")
