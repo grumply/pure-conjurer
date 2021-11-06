@@ -1,6 +1,7 @@
 module Pure.Conjurer.API where
 
 import Pure.Conjurer.Context
+import Pure.Conjurer.Interaction
 import Pure.Conjurer.Previewable
 import Pure.Conjurer.Producible
 import Pure.Conjurer.Resource
@@ -10,6 +11,15 @@ import Pure.WebSocket as WS
 
 import Data.Proxy
 import Data.Typeable
+
+data InteractResource resource
+instance Identify (InteractResource resource)
+instance (Typeable resource) => Request (InteractResource resource) where
+  type Req (InteractResource resource) = (Int,(Context resource,Name resource,Action resource))
+  type Rsp (InteractResource resource) = Maybe (Reaction resource)
+  
+interactResource :: Proxy (InteractResource resource)
+interactResource = Proxy
 
 data CreateResource resource
 instance Identify (CreateResource resource)
@@ -109,6 +119,7 @@ type PublishingAPI resource =
    , PreviewResource resource
    , AmendResource resource
    , PreviewAmendResource resource
+   , InteractResource resource
    ]
 
 type ReadingAPI resource =
@@ -132,6 +143,7 @@ publishingAPI = api msgs reqs
        <:> previewResource @resource
        <:> amendResource @resource
        <:> previewAmendResource @resource
+       <:> interactResource @resource
        <:> WS.none
 
 readingAPI 

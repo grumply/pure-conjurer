@@ -7,6 +7,7 @@ import Pure.Conjurer.Creatable as Export
 import Pure.Conjurer.Fieldable as Export
 import Pure.Conjurer.Formable as Export
 import Pure.Conjurer.Index as Export
+import Pure.Conjurer.Interaction as Export
 import Pure.Conjurer.Key as Export
 import Pure.Conjurer.Listable as Export 
 import Pure.Conjurer.Name as Export 
@@ -154,10 +155,10 @@ tryCreate Permissions {..} Callbacks {..} ctx a0 = do
     Nothing -> pure Nothing
     Just a -> do
       let name = toName a
-      can <- canCreate ctx name
+      can <- canCreate ctx name a
       if can then do
         withLock ctx name do
-          Sorcerer.observe (ResourceStream ctx name) (SetResource a) >>= \case
+          Sorcerer.observe (ResourceStream ctx name) (CreateResource a) >>= \case
             Added (new :: Resource a) -> do
               pro <- produce False new
               pre <- preview False new pro
@@ -223,7 +224,7 @@ tryAmend
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> Context a -> Name a -> Amend a -> IO (Maybe (Product a,Preview a,[(Name a,Preview a)]))
 tryAmend Permissions {..} Callbacks {..} ctx name a = do
-  can <- canUpdate ctx name
+  can <- canAmend ctx name a
   if can then
     withLock ctx name do
       Sorcerer.transact (ResourceStream ctx name) (AmendResource a) >>= \case
@@ -281,7 +282,12 @@ tryReadResource
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> Context a -> Name a -> IO (Maybe (Resource a))
 tryReadResource Permissions {..} Callbacks {..} ctx name = do
-  can <- canRead ctx name
+  -- Note: Resource often hides details that might shouldn't be user-facing, 
+  -- so we protect it with canUpdate rather than canRead. I can't think of a
+  -- case where you would want to view a resource, but not update it. At least,
+  -- it is not how I originally intended for the library to be used, but I can 
+  -- see an argument for having a dedicated permissions check.
+  can <- canUpdate ctx name 
   if can then do
     mres <- Sorcerer.read (ResourceStream ctx name)
     case mres of
@@ -351,11 +357,36 @@ tryReadListing Permissions {..} Callbacks {..} ctx = do
   else
     pure Nothing
 
+tryInteract 
+  :: forall a.
+    ( Typeable a 
+    , Amendable a
+    , ToJSON (Amend a)
+    , FromJSON (Resource a), ToJSON (Resource a)
+    , FromJSON (Amend a), ToJSON (Amend a)
+    , Hashable (Context a), Pathable (Context a)
+    , Hashable (Name a), Pathable (Name a)
+    ) => Permissions a -> Callbacks a -> Interaction a -> Context a -> Name a -> Action a -> IO (Maybe (Reaction a))
+tryInteract Permissions {..} Callbacks {..} Interaction {..} ctx name action = do
+  can <- canInteract ctx name action
+  if can then do
+    mres <- Sorcerer.read (ResourceStream ctx name)
+    case mres of
+      Nothing -> pure Nothing
+      Just res -> do
+        reaction <- interact ctx name res action
+        onInteract ctx name res action reaction
+        pure (Just reaction)
+  else
+    pure Nothing
+
 --------------------------------------------------------------------------------
 
 publishing :: 
   ( Typeable a
   , Processable a, Amendable a, Nameable a, Previewable a, Producible a 
+  , ToJSON (Action a), FromJSON (Action a)
+  , ToJSON (Reaction a), FromJSON (Reaction a)
   , ToJSON (Resource a), FromJSON (Resource a)
   , ToJSON (Product a), FromJSON (Product a)
   , ToJSON (Preview a), FromJSON (Preview a)
@@ -364,9 +395,9 @@ publishing ::
   , Pathable (Context a), Hashable (Context a), Ord (Context a)
   , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
   , FromJSON (Amend a), ToJSON (Amend a)
-  ) => Permissions a -> Callbacks a 
+  ) => Permissions a -> Callbacks a -> Interaction a
     -> Endpoints '[] (PublishingAPI a) '[] (PublishingAPI a)
-publishing ps cs = Endpoints publishingAPI msgs reqs
+publishing ps cs i = Endpoints publishingAPI msgs reqs
   where
     msgs = WS.none
     reqs = handleCreateResource ps cs 
@@ -376,6 +407,7 @@ publishing ps cs = Endpoints publishingAPI msgs reqs
        <:> handlePreviewResource ps cs
        <:> handleAmendResource ps cs
        <:> handlePreviewAmendResource ps cs
+       <:> handleInteractResource ps cs i
        <:> WS.none
 
 reading :: 
@@ -496,7 +528,7 @@ handlePreviewResource permissions callbacks = responding do
       Nothing -> pure Nothing
       Just res -> do
         let name = toName res
-        can <- canCreate permissions ctx name
+        can <- canCreate permissions ctx name res
         if can then do
           pro <- produce True res
           pre <- preview True res pro
@@ -524,7 +556,7 @@ handlePreviewAmendResource permissions callbacks = responding do
     tryReadResource permissions callbacks ctx name >>= \case
       Nothing -> pure Nothing
       Just resource -> do
-        can <- canUpdate permissions ctx name
+        can <- canAmend permissions ctx name a
         if can then do
           case amend a resource of
             Nothing -> pure Nothing
@@ -534,6 +566,22 @@ handlePreviewAmendResource permissions callbacks = responding do
               pure (Just (ctx,name,pre,pro,res))
         else
           pure Nothing
+  reply response
+
+handleInteractResource
+  :: forall a. 
+    ( Typeable a 
+    , Amendable a
+    , FromJSON (Amend a), ToJSON (Amend a)
+    , FromJSON (Resource a), ToJSON (Resource a)
+    , FromJSON (Action a)
+    , ToJSON (Reaction a)
+    , FromJSON (Context a), Hashable (Context a), Pathable (Context a)
+    , FromJSON (Name a), Hashable (Name a), Pathable (Name a)
+    ) => Permissions a -> Callbacks a -> Interaction a -> RequestHandler (InteractResource a)
+handleInteractResource permissions callbacks interaction = responding do
+  (ctx,name,action) <- acquire
+  response <- liftIO (tryInteract permissions callbacks interaction ctx name action)
   reply response
 
 handleAmendResource
@@ -836,6 +884,8 @@ tryReadListingFromCache Permissions {..} Callbacks {..} ctx = do
 cachingPublishing :: 
   ( Typeable a
   , Processable a, Amendable a, Nameable a, Previewable a, Producible a 
+  , ToJSON (Action a), FromJSON (Action a)
+  , ToJSON (Reaction a), FromJSON (Reaction a)
   , ToJSON (Resource a), FromJSON (Resource a)
   , ToJSON (Product a), FromJSON (Product a)
   , ToJSON (Preview a), FromJSON (Preview a)
@@ -844,9 +894,9 @@ cachingPublishing ::
   , Pathable (Context a), Hashable (Context a)
   , Pathable (Name a), Hashable (Name a), Eq (Name a)
   , FromJSON (Amend a), ToJSON (Amend a)
-  ) => Permissions a -> Callbacks a 
+  ) => Permissions a -> Callbacks a -> Interaction a
     -> Endpoints '[] (PublishingAPI a) '[] (PublishingAPI a)
-cachingPublishing ps cs = Endpoints publishingAPI msgs reqs
+cachingPublishing ps cs i = Endpoints publishingAPI msgs reqs
   where
     msgs = WS.none
     reqs = handleCachingCreateResource ps cs 
@@ -856,6 +906,7 @@ cachingPublishing ps cs = Endpoints publishingAPI msgs reqs
        <:> handlePreviewResource ps cs
        <:> handleCachingAmendResource ps cs
        <:> handlePreviewAmendResource ps cs
+       <:> handleInteractResource ps cs i
        <:> WS.none
 
 cachingReading :: 

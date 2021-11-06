@@ -18,7 +18,7 @@ data family Resource a :: *
 type Amending = Bool
 class Processable a where
   process :: Amending -> Resource a -> IO (Maybe (Resource a))
-  process amending = pure . Just
+  process _ = pure . Just
 
 class Amendable a where
   data Amend a :: *
@@ -30,7 +30,8 @@ class Nameable a where
   toName :: Resource a -> Name a
 
 data ResourceMsg a
-  = SetResource (Resource a)
+  = CreateResource (Resource a)
+  | SetResource (Resource a)
   | AmendResource (Amend a)
   | DeleteResource
   deriving stock Generic
@@ -70,7 +71,8 @@ instance
   , FromJSON (Resource a), ToJSON (Resource a)
   ) => Aggregable (ResourceMsg a) (Resource a)
   where
-    update (SetResource r) _ = Sorcerer.Update r
+    update (CreateResource r) Nothing = Sorcerer.Update r
+    update (SetResource r) (Just _) = Sorcerer.Update r
     update (AmendResource c) (Just r) = maybe Ignore Sorcerer.Update (amend c r)
     update DeleteResource (Just _) = Delete
     update _ _ = Ignore
