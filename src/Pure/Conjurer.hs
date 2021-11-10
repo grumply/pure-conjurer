@@ -367,7 +367,7 @@ tryInteract
     , Hashable (Context a), Pathable (Context a)
     , Hashable (Name a), Pathable (Name a)
     ) => Permissions a -> Callbacks a -> Interactions a -> Context a -> Name a -> Action a -> IO (Maybe (Reaction a))
-tryInteract Permissions {..} Callbacks {..} Interaction {..} ctx name action = do
+tryInteract Permissions {..} Callbacks {..} Interactions {..} ctx name action = do
   can <- canInteract ctx name action
   if can then do
     mres <- Sorcerer.read (ResourceStream ctx name)
