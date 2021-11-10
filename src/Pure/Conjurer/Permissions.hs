@@ -3,7 +3,7 @@ module Pure.Conjurer.Permissions where
 import Pure.Auth (Username)
 import Pure.Conjurer.Context
 import Pure.Conjurer.Resource
-import Pure.Conjurer.Interaction
+import Pure.Conjurer.Interactions
 
 class Ownable resource where
   isOwner :: Username -> Context resource -> Name resource -> IO Bool

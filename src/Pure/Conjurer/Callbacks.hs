@@ -1,7 +1,7 @@
 module Pure.Conjurer.Callbacks where
 
 import Pure.Conjurer.Context
-import Pure.Conjurer.Interaction
+import Pure.Conjurer.Interactions
 import Pure.Conjurer.Previewable
 import Pure.Conjurer.Producible
 import Pure.Conjurer.Resource
