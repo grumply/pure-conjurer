@@ -51,7 +51,7 @@ library
     Pure.Conjurer.Fieldable
     Pure.Conjurer.Formable
     Pure.Conjurer.Index
-    Pure.Conjurer.Interaction
+    Pure.Conjurer.Interactions
     Pure.Conjurer.Listable
     Pure.Conjurer.Key
     Pure.Conjurer.Name

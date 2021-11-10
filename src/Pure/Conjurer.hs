@@ -7,7 +7,7 @@ import Pure.Conjurer.Creatable as Export
 import Pure.Conjurer.Fieldable as Export
 import Pure.Conjurer.Formable as Export
 import Pure.Conjurer.Index as Export
-import Pure.Conjurer.Interaction as Export
+import Pure.Conjurer.Interactions as Export
 import Pure.Conjurer.Key as Export
 import Pure.Conjurer.Listable as Export 
 import Pure.Conjurer.Name as Export 
@@ -235,7 +235,7 @@ tryAmend Permissions {..} Callbacks {..} ctx name a = do
           (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
           (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
             Sorcerer.transact (PreviewsStream ctx) (SetPreviewItem name pre)
-          onUpdate ctx name new pro pre
+          onAmend ctx name new pro pre a
           pure (Just (pro,pre,previews))
         _ ->
           pure Nothing
@@ -366,7 +366,7 @@ tryInteract
     , FromJSON (Amend a), ToJSON (Amend a)
     , Hashable (Context a), Pathable (Context a)
     , Hashable (Name a), Pathable (Name a)
-    ) => Permissions a -> Callbacks a -> Interaction a -> Context a -> Name a -> Action a -> IO (Maybe (Reaction a))
+    ) => Permissions a -> Callbacks a -> Interactions a -> Context a -> Name a -> Action a -> IO (Maybe (Reaction a))
 tryInteract Permissions {..} Callbacks {..} Interaction {..} ctx name action = do
   can <- canInteract ctx name action
   if can then do
@@ -395,7 +395,7 @@ publishing ::
   , Pathable (Context a), Hashable (Context a), Ord (Context a)
   , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
   , FromJSON (Amend a), ToJSON (Amend a)
-  ) => Permissions a -> Callbacks a -> Interaction a
+  ) => Permissions a -> Callbacks a -> Interactions a
     -> Endpoints '[] (PublishingAPI a) '[] (PublishingAPI a)
 publishing ps cs i = Endpoints publishingAPI msgs reqs
   where
@@ -578,7 +578,7 @@ handleInteractResource
     , ToJSON (Reaction a)
     , FromJSON (Context a), Hashable (Context a), Pathable (Context a)
     , FromJSON (Name a), Hashable (Name a), Pathable (Name a)
-    ) => Permissions a -> Callbacks a -> Interaction a -> RequestHandler (InteractResource a)
+    ) => Permissions a -> Callbacks a -> Interactions a -> RequestHandler (InteractResource a)
 handleInteractResource permissions callbacks interaction = responding do
   (ctx,name,action) <- acquire
   response <- liftIO (tryInteract permissions callbacks interaction ctx name action)
@@ -894,7 +894,7 @@ cachingPublishing ::
   , Pathable (Context a), Hashable (Context a)
   , Pathable (Name a), Hashable (Name a), Eq (Name a)
   , FromJSON (Amend a), ToJSON (Amend a)
-  ) => Permissions a -> Callbacks a -> Interaction a
+  ) => Permissions a -> Callbacks a -> Interactions a
     -> Endpoints '[] (PublishingAPI a) '[] (PublishingAPI a)
 cachingPublishing ps cs i = Endpoints publishingAPI msgs reqs
   where

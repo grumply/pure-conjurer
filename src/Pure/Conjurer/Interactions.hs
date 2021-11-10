@@ -1,4 +1,4 @@
-module Pure.Conjurer.Interaction where
+module Pure.Conjurer.Interactions where
 
 import Pure.Conjurer.Context
 import Pure.Conjurer.Name
@@ -11,11 +11,11 @@ import Data.Typeable
 data family Action a
 data family Reaction a
 
-data Interaction a = Interaction
+data Interactions a = Interactions
   { interact :: Context a -> Name a -> Resource a -> Action a -> IO (Reaction a)
   }
 
-instance Typeable a => Default (Interaction a) where
+instance Typeable a => Default (Interactions a) where
   def = 
     let tc = show (typeRepTyCon (typeOf (undefined :: a)))
-    in Interaction (\_ _ _ _ -> error $ "Interaction (" <> tc <> "): Not implemented.")
+    in Interactions (\_ _ _ _ -> error $ "Interactions (" <> tc <> "): Not implemented.")

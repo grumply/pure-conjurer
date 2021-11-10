@@ -12,6 +12,7 @@ data Callbacks resource = Callbacks
   { onCreate   :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> IO ()
   , onUpdate   :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> IO ()
   , onDelete   :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> IO ()
+  , onAmend    :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> Amend resource -> IO ()
   , onInteract :: Context resource -> Name resource -> Resource resource -> Action resource -> Reaction resource -> IO ()
   , onResource :: Context resource -> Name resource -> Resource resource -> IO ()
   , onRead     :: Context resource -> Name resource -> Product resource  -> IO ()
@@ -24,6 +25,7 @@ instance Default (Callbacks resource) where
     { onCreate   = def
     , onUpdate   = def
     , onDelete   = def
+    , onAmend    = def
     , onInteract = def
     , onResource = def
     , onRead     = def
