@@ -56,9 +56,27 @@ import Unsafe.Coerce
 
 import Prelude hiding (Read)
 
+type Conjurable a =
+    ( Typeable a
+    , Processable a
+    , Producible a
+    , Previewable a
+    , Amendable a
+    , Nameable a
+    , ToJSON (Context a), FromJSON (Context a), Pathable (Context a), Hashable (Context a), Ord (Context a)
+    , ToJSON (Name a), FromJSON (Name a), Pathable (Name a), Hashable (Name a), Ord (Name a)
+    , ToJSON (Resource a), FromJSON (Resource a)
+    , ToJSON (Product a), FromJSON (Product a)
+    , ToJSON (Preview a), FromJSON (Preview a)
+    , ToJSON (Action a), FromJSON (Action a)
+    , ToJSON (Reaction a), FromJSON (Reaction a)
+    , ToJSON (Amend a), FromJSON (Amend a)
+    )
+
 --------------------------------------------------------------------------------  
 
-db :: forall a. 
+conjure 
+  :: forall a. 
     ( Typeable a
     , Amendable a
     , ToJSON (Resource a), FromJSON (Resource a)
@@ -70,7 +88,7 @@ db :: forall a.
     , Pathable (Name a), Hashable (Name a), Eq (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => [Listener]
-db = 
+conjure = 
   [ listener @(ResourceMsg a) @(Resource a)
   , listener @(IndexMsg a) @(Index a)
   , listener @(ProductMsg a) @(Product a)

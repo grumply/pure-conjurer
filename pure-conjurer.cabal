@@ -103,6 +103,7 @@ library
     FunctionalDependencies
     ViewPatterns
     BangPatterns
+    ConstraintKinds
   
   if !impl(ghcjs)
     build-depends:
