@@ -9,6 +9,7 @@ import Pure.Data.Txt
 import Pure.Router
 
 import Control.Monad
+import Data.Typeable
 
 class Routable resource where
   createRoute :: (Context resource -> rt) -> Routing rt ()
@@ -88,3 +89,4 @@ class Routable resource where
        ) => Context resource -> Txt
   toListRoute ctx = root @resource <> "/list" <> toPath ctx
 
+instance {-# INCOHERENT #-} (Typeable a, Pathable (Context a), Pathable (Name a)) => Routable a

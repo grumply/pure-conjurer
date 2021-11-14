@@ -81,6 +81,8 @@ class Formable rec where
       , ..
       }
 
+instance {-# INCOHERENT #-} (Typeable x, Generic x, GFormable (Rep x)) => Formable x 
+
 class GFormable f where
   gform :: (forall x. f x -> IO ()) -> f x -> View
 

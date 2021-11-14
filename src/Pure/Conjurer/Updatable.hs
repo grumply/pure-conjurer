@@ -130,3 +130,15 @@ cachingToUpdate ws ctx nm =
       else 
         pure ()
 
+instance {-# INCOHERENT #-}
+  ( Typeable _role
+  , ToJSON (Context resource), FromJSON (Context resource), Pathable (Context resource), Eq (Context resource)
+  , ToJSON (Name resource), FromJSON (Name resource), Pathable (Name resource), Eq (Name resource)
+  , ToJSON (Resource resource), FromJSON (Resource resource)
+  , FromJSON (Preview resource)
+  , FromJSON (Product resource)
+  , Formable (Resource resource)
+  , Component (Preview resource)
+  , Component (Product resource)
+  , Theme resource
+  ) => Updatable _role resource

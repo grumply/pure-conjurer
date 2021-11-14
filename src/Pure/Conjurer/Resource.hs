@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-missing-methods #-}
 module Pure.Conjurer.Resource (Stream(..),Resource(..),ResourceMsg(..),Name(..),Nameable(..),Processable(..),Amendable(..)) where
 
 import Pure.Conjurer.Context
@@ -19,6 +20,8 @@ type Amending = Bool
 class Processable a where
   process :: Amending -> Resource a -> IO (Maybe (Resource a))
   process _ = pure . Just
+
+instance {-# INCOHERENT #-} Processable a
 
 class Amendable a where
   data Amend a :: *

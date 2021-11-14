@@ -11,6 +11,8 @@ class Fieldable x where
   default field :: (Generic x, GFieldable (Rep x)) => (x -> IO ()) -> x -> View
   field onchange initial = gfield (onchange . G.to) (G.from initial)
 
+instance {-# INCOHERENT #-} (Generic x, GFieldable (Rep x)) => Fieldable x
+
 class GFieldable f where
   gfield :: forall x. (f x -> IO ()) -> f x -> View
 

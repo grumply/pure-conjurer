@@ -64,3 +64,10 @@ cachingToRead _ ctx nm = producingKeyed (ctx,nm) producer (\_ -> consuming consu
     consumer = 
       maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ run x ])
 
+instance {-# INCOHERENT #-}
+  ( Theme resource
+  , ToJSON (Context resource), FromJSON (Context resource), Eq (Context resource)
+  , ToJSON (Name resource), FromJSON (Name resource), Eq (Name resource)
+  , FromJSON (Product resource)
+  , Component (Product resource)
+  ) => Readable resource

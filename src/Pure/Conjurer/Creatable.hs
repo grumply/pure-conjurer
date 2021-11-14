@@ -23,7 +23,6 @@ import Pure.WebSocket
 
 import Data.Typeable
 
-
 data Creating
 instance Theme Creating
 
@@ -69,3 +68,16 @@ class Creatable _role resource where
           [ form onSubmit onPreview def
           ]
 
+instance {-# INCOHERENT #-}
+  ( Typeable resource, Typeable _role
+  , Routable resource
+  , Theme resource
+  , ToJSON (Resource resource), FromJSON (Resource resource), Default (Resource resource)
+  , ToJSON (Context resource), FromJSON (Context resource)
+  , FromJSON (Name resource)
+  , FromJSON (Preview resource)
+  , FromJSON (Product resource)
+  , Formable (Resource resource)
+  , Component (Preview resource)
+  , Component (Product resource)
+  ) => Creatable _role resource

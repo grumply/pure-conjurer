@@ -93,3 +93,11 @@ cachingToList shouldPreloadPreviews _ ctx =
               req Cached (readingAPI @resource) 
                 (readProduct @resource) 
                 (ctx,nm)
+                
+instance {-# INCOHERENT #-}
+  ( ToJSON (Context resource), FromJSON (Context resource), Pathable (Context resource), Eq (Context resource)
+  , ToJSON (Name resource), FromJSON (Name resource), Pathable (Name resource), Eq (Name resource)
+  , Theme resource
+  , FromJSON (Preview resource)
+  , Component (Preview resource)
+  ) => Listable resource
