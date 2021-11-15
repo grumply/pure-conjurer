@@ -1,6 +1,7 @@
 module Pure.Conjurer.Previewable (Stream(..),Preview(..),PreviewMsg(..),Previewable(..)) where
 
 import Pure.Conjurer.Context
+import Pure.Conjurer.Name
 import Pure.Conjurer.Pathable
 import Pure.Conjurer.Producible
 import Pure.Conjurer.Resource
@@ -14,17 +15,23 @@ import Data.Hashable
 import Data.Typeable
 import GHC.Generics
 
+import Prelude
+
 data family Preview a :: *
 
 type Previewing = Bool
 class Previewable a where
-  preview :: Previewing -> Resource a -> Product a -> IO (Preview a)
-  default preview :: Typeable a => Previewing -> Resource a -> Product a -> IO (Preview a)
-  preview _ _ _ =
+  preview :: Previewing -> Context a -> Name a -> Resource a -> Product a -> IO (Preview a)
+  default preview :: Typeable a => Previewing -> Context a -> Name a -> Resource a -> Product a -> IO (Preview a)
+  preview _ _ _ _ _ =
     let 
-      tc = show (typeRepTyCon (typeOf (undefined :: a)))
+      tc = 
+        let x = show (typeRepTyCon (typeOf (undefined :: a)))
+        in if Prelude.length (Prelude.words x) > 1 then "(" <> x <> ")" else x
       err = "Previewable " <> tc 
-         <> " => preview :: Resource " <> tc 
+         <> " => preview :: Previewing -> Context " <> tc
+         <> " -> Name " <> tc
+         <> " -> Resource " <> tc 
          <> " -> Product " <> tc 
          <> " -> IO (Preview " <> tc <> "): Not implemented."
     in 

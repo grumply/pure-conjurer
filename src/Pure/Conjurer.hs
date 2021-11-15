@@ -112,6 +112,23 @@ getResourceLocks =
         rqs <- newTMVarIO (unsafeCoerce (mempty :: Map (Context a,Name a) Queue))
         pure (Map.insert tr rqs lt,rqs)
 
+-- WARNINGS: 
+--   Always acquire locks in the same order!
+--
+--   Make sure you conform to some unidirectional resource hierarchy for
+--   calling any of the update methods, like `tryUpdate` - especially if
+--   you call them from within an `onUpdate` callback, for example!
+--
+-- If I make `withLock` an optional combinator, and combine it with a retry 
+-- semantics, I could push burden of managing the possibility of deadlocks onto
+-- the user of the library, but that requires that the user of the library have
+-- a deeper knowledge of its inner workings. Instaed, I find this approach,
+-- where dependent updates should always be unidirectional, and enforced by the 
+-- library user, is a reasonable trade-off for simplicity of understanding and
+-- ease-of-use.
+--
+-- I have a feeling I'll be back here soon, cursing myself. Apologies, in advance.
+--
 withLock :: forall a b. (Ord (Context a), Ord (Name a), Typeable a) => Context a -> Name a -> IO b -> IO b
 withLock ctx nm f = getResourceLocks @a >>= start
   where 
@@ -178,8 +195,8 @@ tryCreate Permissions {..} Callbacks {..} ctx a0 = do
         withLock ctx name do
           Sorcerer.observe (ResourceStream ctx name) (CreateResource a) >>= \case
             Added (new :: Resource a) -> do
-              pro <- produce False new
-              pre <- preview False new pro
+              pro <- produce False ctx name new
+              pre <- preview False ctx name new pro
               (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
               (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
               Sorcerer.write (IndexStream @a) (ResourceAdded ctx name)
@@ -215,8 +232,8 @@ tryUpdate Permissions {..} Callbacks {..} ctx name a0 = do
         withLock ctx name do
           Sorcerer.transact (ResourceStream ctx name) (SetResource a) >>= \case
             Sorcerer.Update (new :: Resource a) -> do
-              pro <- produce False new 
-              pre <- preview False new pro
+              pro <- produce False ctx name new 
+              pre <- preview False ctx name new pro
               (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
               (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
               (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
@@ -247,8 +264,8 @@ tryAmend Permissions {..} Callbacks {..} ctx name a = do
     withLock ctx name do
       Sorcerer.transact (ResourceStream ctx name) (AmendResource a) >>= \case
         Sorcerer.Update (new :: Resource a) -> do
-          pro <- produce False new
-          pre <- preview False new pro
+          pro <- produce False ctx name new
+          pre <- preview False ctx name new pro
           (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
           (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
           (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
@@ -548,8 +565,8 @@ handlePreviewResource permissions callbacks = responding do
         let name = toName res
         can <- canCreate permissions ctx name res
         if can then do
-          pro <- produce True res
-          pre <- preview True res pro
+          pro <- produce True ctx name res
+          pre <- preview True ctx name res pro
           pure (Just (ctx,name,pre,pro,res))
         else
           pure Nothing
@@ -579,8 +596,8 @@ handlePreviewAmendResource permissions callbacks = responding do
           case amend a resource of
             Nothing -> pure Nothing
             Just res -> do
-              pro <- produce True res
-              pre <- preview True res pro
+              pro <- produce True ctx name res
+              pre <- preview True ctx name res pro
               pure (Just (ctx,name,pre,pro,res))
         else
           pure Nothing

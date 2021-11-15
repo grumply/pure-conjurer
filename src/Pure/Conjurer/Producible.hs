@@ -13,15 +13,26 @@ import Data.Hashable
 import Data.Typeable
 import GHC.Generics
 
+import Prelude
+
 data family Product a :: *
 
 type Previewing = Bool
 class Producible a where
-  produce :: Previewing -> Resource a -> IO (Product a)
-  default produce :: Typeable a => Previewing -> Resource a -> IO (Product a)
-  produce _ _ = 
-    let tc = show (typeRepTyCon (typeOf (undefined :: a)))
-    in pure (error $ "Producible " <> tc <> " => produce :: Bool -> Resource " <> tc <> " -> IO (Product " <> tc <> "): Not implemented.")
+  produce :: Previewing -> Context a -> Name a -> Resource a -> IO (Product a)
+  default produce :: Typeable a => Previewing -> Context a -> Name a -> Resource a -> IO (Product a)
+  produce _ _ _ _ = 
+    let 
+      tc = 
+        let x = show (typeRepTyCon (typeOf (undefined :: a)))
+        in if Prelude.length (Prelude.words x) > 1 then "(" <> x <> ")" else x
+      err = "Producible " <> tc 
+         <> " => produce :: Previewing -> Context " <> tc
+         <> " -> Name " <> tc
+         <> " -> Resource " <> tc 
+         <> " -> IO (Product " <> tc <> "): Not implemented."
+    in 
+      pure (error err)
 
 data ProductMsg a
   = SetProduct (Product a)
