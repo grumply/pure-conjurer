@@ -56,7 +56,7 @@ instance
       deriving stock Generic
 
     stream (ProductStream ctx nm) = 
-      "conjurer/products/" 
+      "conjurer/product/" 
         ++ show (typeRepTyCon (typeOf (undefined :: a))) 
         ++ fromTxt (toPath ctx)
         ++ fromTxt (toPath nm)

@@ -56,7 +56,7 @@ instance
       deriving stock Generic
       
     stream (ResourceStream ctx nm) = 
-      "conjurer/resources/" 
+      "conjurer/resource/" 
         ++ show (typeRepTyCon (typeOf (undefined :: a))) 
         ++ fromTxt (toPath ctx)
         ++ fromTxt (toPath nm)

@@ -51,7 +51,7 @@ instance
       deriving stock Generic
 
     stream (PreviewsStream ctx) = 
-      "conjurer/previewss/" 
+      "conjurer/previews/" 
         ++ show (typeRepTyCon (typeOf (undefined :: a))) 
         ++ fromTxt (toPath ctx)
         ++ "/previews.stream"
