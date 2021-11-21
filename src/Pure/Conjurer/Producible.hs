@@ -2,6 +2,7 @@ module Pure.Conjurer.Producible (Stream(..),Product(..),ProductMsg(..),Producibl
 
 import Pure.Conjurer.Context
 import Pure.Conjurer.Pathable
+import Pure.Conjurer.Rep
 import Pure.Conjurer.Resource
 
 import Pure.Data.JSON
@@ -23,9 +24,7 @@ class Producible a where
   default produce :: Typeable a => Previewing -> Context a -> Name a -> Resource a -> IO (Product a)
   produce _ _ _ _ = 
     let 
-      tc = 
-        let x = show (typeRepTyCon (typeOf (undefined :: a)))
-        in if Prelude.length (Prelude.words x) > 1 then "(" <> x <> ")" else x
+      tc = fromTxt (rep @a)
       err = "Producible " <> tc 
          <> " => produce :: Previewing -> Context " <> tc
          <> " -> Name " <> tc
@@ -57,7 +56,7 @@ instance
 
     stream (ProductStream ctx nm) = 
       "conjurer/product/" 
-        ++ show (typeRepTyCon (typeOf (undefined :: a))) 
+        ++ fromTxt (rep @a)
         ++ fromTxt (toPath ctx)
         ++ fromTxt (toPath nm)
         ++ ".stream"

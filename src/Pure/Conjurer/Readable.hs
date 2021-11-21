@@ -1,4 +1,4 @@
-module Pure.Conjurer.Readable (Readable(..),Reading,cachingToRead) where
+module Pure.Conjurer.Readable (Readable(..),Reading,toReadWith,cachingToReadWith,cachingToRead) where
 
 import Pure.Conjurer.API
 import Pure.Conjurer.Context
@@ -35,13 +35,44 @@ class Readable resource where
        , Eq (Context resource)
        , Eq (Name resource)
        ) => WebSocket -> Context resource -> Name resource -> View
-  toRead ws ctx nm = producingKeyed (ctx,nm) producer (\_ -> consuming consumer)
-    where
-      producer = sync .
-        request (readingAPI @resource) ws 
-          (readProduct @resource) 
+  toRead = 
+    toReadWith $ \_ _ ->
+      maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ run x ])
 
-      consumer = maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ run x ])
+toReadWith
+  :: forall resource.
+    ( Typeable resource
+     , FromJSON (Context resource), ToJSON (Context resource)
+     , FromJSON (Name resource), ToJSON (Name resource)
+     , FromJSON (Product resource)
+     , Eq (Context resource)
+     , Eq (Name resource)
+     ) => (Context resource -> Name resource -> Maybe (Product resource) -> View) -> WebSocket -> Context resource -> Name resource -> View
+toReadWith f ws ctx nm = producingKeyed (ctx,nm) producer (consuming . consumer)
+  where
+    producer = sync .
+      request (readingAPI @resource) ws 
+        (readProduct @resource) 
+
+    consumer (ctx,nm) = f ctx nm 
+
+cachingToReadWith
+  :: forall resource.
+    ( Typeable resource
+    , FromJSON (Context resource), ToJSON (Context resource), Ord (Context resource)
+    , FromJSON (Name resource), ToJSON (Name resource), Ord (Name resource)
+    , FromJSON (Product resource)
+    , Eq (Context resource)
+    , Eq (Name resource)
+    ) 
+  => (Context resource -> Name resource -> Maybe (Product resource) -> View) -> WebSocket -> Context resource -> Name resource -> View
+cachingToReadWith f _ ctx nm = producingKeyed (ctx,nm) producer (consuming . consumer)
+  where
+    producer =
+      req Cached (readingAPI @resource)
+        (readProduct @resource) 
+
+    consumer (ctx,nm) = f ctx nm
 
 cachingToRead 
   :: forall resource.
@@ -55,14 +86,9 @@ cachingToRead
     , Eq (Name resource)
     ) 
   => WebSocket -> Context resource -> Name resource -> View
-cachingToRead _ ctx nm = producingKeyed (ctx,nm) producer (\_ -> consuming consumer)
-  where
-    producer =
-      req Cached (readingAPI @resource)
-        (readProduct @resource) 
-
-    consumer = 
-      maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ run x ])
+cachingToRead = 
+  cachingToReadWith $ \_ _ ->
+    maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ run x ])
 
 instance {-# INCOHERENT #-}
   ( Theme resource

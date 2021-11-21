@@ -61,6 +61,7 @@ library
     Pure.Conjurer.Previews
     Pure.Conjurer.Producible
     Pure.Conjurer.Readable
+    Pure.Conjurer.Rep
     Pure.Conjurer.Resource
     Pure.Conjurer.Rootable
     Pure.Conjurer.Routable

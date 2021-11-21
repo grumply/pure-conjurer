@@ -4,6 +4,7 @@ module Pure.Conjurer.Resource (Stream(..),Resource(..),ResourceMsg(..),Name(..),
 import Pure.Conjurer.Context
 import Pure.Conjurer.Name
 import Pure.Conjurer.Pathable
+import Pure.Conjurer.Rep
 
 import Pure.Data.JSON
 import Pure.Data.Txt
@@ -57,7 +58,7 @@ instance
       
     stream (ResourceStream ctx nm) = 
       "conjurer/resource/" 
-        ++ show (typeRepTyCon (typeOf (undefined :: a))) 
+        ++ fromTxt (rep @a)
         ++ fromTxt (toPath ctx)
         ++ fromTxt (toPath nm)
         ++ ".stream"

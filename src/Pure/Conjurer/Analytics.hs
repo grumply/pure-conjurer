@@ -9,7 +9,7 @@ import Pure.Data.Time
 import Pure.Data.Marker
 import Pure.Elm.Component (Default(..))
 import Pure.Sorcerer as Sorcerer
-import Pure.WebSocket hiding (Nat)
+import Pure.WebSocket hiding (Nat,rep)
 
 import Data.Hashable
 
@@ -106,7 +106,7 @@ instance
 
     stream AnalyticsStream =
       "conjuredb/analytics/" 
-        ++ show (typeRepTyCon (typeOf (undefined :: a))) 
+        ++ fromTxt (rep @a)
         ++ "/analytics.stream" 
 
 data Analytics = Analytics 

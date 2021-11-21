@@ -4,10 +4,11 @@ import Pure.Conjurer.Context
 import Pure.Conjurer.Name
 import Pure.Conjurer.Pathable
 import Pure.Conjurer.Producible
+import Pure.Conjurer.Rep
 import Pure.Conjurer.Resource
 
 import Pure.Data.JSON
-import Pure.Data.Txt
+import Pure.Data.Txt (FromTxt(..))
 import Pure.Sorcerer as Sorcerer
 
 import Data.Hashable
@@ -25,9 +26,7 @@ class Previewable a where
   default preview :: Typeable a => Previewing -> Context a -> Name a -> Resource a -> Product a -> IO (Preview a)
   preview _ _ _ _ _ =
     let 
-      tc = 
-        let x = show (typeRepTyCon (typeOf (undefined :: a)))
-        in if Prelude.length (Prelude.words x) > 1 then "(" <> x <> ")" else x
+      tc = fromTxt (rep @a)
       err = "Previewable " <> tc 
          <> " => preview :: Previewing -> Context " <> tc
          <> " -> Name " <> tc
@@ -56,7 +55,7 @@ instance
 
     stream (PreviewStream ctx nm) = 
       "conjurer/preview/" 
-        ++ show (typeRepTyCon (typeOf (undefined :: a))) 
+        ++ fromTxt (rep @a)
         ++ fromTxt (toPath ctx)
         ++ fromTxt (toPath nm)
         ++ ".stream"

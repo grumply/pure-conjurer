@@ -3,6 +3,7 @@ module Pure.Conjurer.Previews where
 import Pure.Conjurer.Context
 import Pure.Conjurer.Pathable
 import Pure.Conjurer.Previewable
+import Pure.Conjurer.Rep
 import Pure.Conjurer.Resource
 
 import Pure.Data.JSON
@@ -52,7 +53,7 @@ instance
 
     stream (PreviewsStream ctx) = 
       "conjurer/previews/" 
-        ++ show (typeRepTyCon (typeOf (undefined :: a))) 
+        ++ fromTxt (rep @a)
         ++ fromTxt (toPath ctx)
         ++ "/previews.stream"
 

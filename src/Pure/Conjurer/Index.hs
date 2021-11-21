@@ -2,8 +2,10 @@ module Pure.Conjurer.Index where
 
 import Pure.Conjurer.Context
 import Pure.Conjurer.Resource
+import Pure.Conjurer.Rep
 
-import Pure.Data.JSON
+import Pure.Data.JSON (ToJSON,FromJSON)
+import Pure.Data.Txt (FromTxt(..))
 import Pure.Sorcerer as Sorcerer
 
 import Data.Hashable
@@ -37,7 +39,7 @@ instance
       
     stream IndexStream = 
       "conjurer/indexes/" 
-        ++ show (typeRepTyCon (typeOf (undefined :: a))) 
+        ++ fromTxt (rep @a)
         ++ "/index.stream"
 
 instance 

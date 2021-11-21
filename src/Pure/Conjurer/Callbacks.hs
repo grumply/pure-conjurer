@@ -5,14 +5,21 @@ import Pure.Conjurer.Interactions
 import Pure.Conjurer.Previewable
 import Pure.Conjurer.Producible
 import Pure.Conjurer.Resource
+import Pure.Conjurer.Rep
 
+import Pure.Auth (Username)
 import Pure.Data.Default
 
+import Pure.Data.Txt
+import Pure.Data.JSON
+
+import Data.Typeable
+
 data Callbacks resource = Callbacks
-  { onCreate   :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> IO ()
-  , onUpdate   :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> IO ()
-  , onDelete   :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> IO ()
-  , onAmend    :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> Amend resource -> IO ()
+  { onCreate   :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> [(Name resource,Preview resource)] -> IO ()
+  , onUpdate   :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> [(Name resource,Preview resource)] -> IO ()
+  , onDelete   :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> [(Name resource,Preview resource)] -> IO ()
+  , onAmend    :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> [(Name resource,Preview resource)] -> Amend resource -> IO ()
   , onInteract :: Context resource -> Name resource -> Resource resource -> Action resource -> Reaction resource -> IO ()
   , onResource :: Context resource -> Name resource -> Resource resource -> IO ()
   , onRead     :: Context resource -> Name resource -> Product resource  -> IO ()
@@ -20,15 +27,24 @@ data Callbacks resource = Callbacks
   , onList     :: Context resource -> [(Name resource,Preview resource)] -> IO ()
   }
 
-instance Default (Callbacks resource) where
-  def = Callbacks
-    { onCreate   = def
-    , onUpdate   = def
-    , onDelete   = def
-    , onAmend    = def
-    , onInteract = def
-    , onResource = def
-    , onRead     = def
-    , onPreview  = def
-    , onList     = def
-    }
+emptyCallbacks :: forall a. Typeable a => Callbacks a
+emptyCallbacks = Callbacks
+  { onCreate   = def
+  , onUpdate   = def
+  , onDelete   = def
+  , onAmend    = def
+  , onInteract = def
+  , onResource = def
+  , onRead     = def
+  , onPreview  = def
+  , onList     = def
+  } 
+
+class DefaultCallbacks x where
+  callbacks :: Typeable x => Maybe Username -> Callbacks x
+  callbacks _ = emptyCallbacks
+
+instance {-# INCOHERENT #-} Typeable x => DefaultCallbacks x
+
+instance Typeable a => Default (Callbacks a) where
+  def = emptyCallbacks

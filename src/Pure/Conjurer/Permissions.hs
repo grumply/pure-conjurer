@@ -1,9 +1,10 @@
 module Pure.Conjurer.Permissions where
 
-import Pure.Auth (Username)
 import Pure.Conjurer.Context
 import Pure.Conjurer.Resource
 import Pure.Conjurer.Interactions
+
+import Pure.Auth (Username)
 
 class Ownable resource where
   isOwner :: Username -> Context resource -> Name resource -> IO Bool
@@ -16,6 +17,17 @@ data Permissions resource = Permissions
   , canDelete   :: Context resource -> Name resource -> IO Bool
   , canRead     :: Context resource -> Name resource -> IO Bool
   , canList     :: Context resource -> IO Bool
+  }
+
+noPermissions :: Permissions resource
+noPermissions = Permissions
+  { canCreate   = \_ _ _ -> pure False
+  , canUpdate   = \_ _ -> pure False
+  , canAmend    = \_ _ _ -> pure False
+  , canInteract = \_ _ _ -> pure False
+  , canDelete   = \_ _ -> pure False
+  , canRead     = \_ _ -> pure False
+  , canList     = \_   -> pure False
   }
 
 fullPermissions :: Permissions resource
@@ -48,5 +60,14 @@ defaultPermissions = \case
     , canUpdate   = isOwner un
     , canAmend    = \ctx nm _ -> isOwner un ctx nm
     , canInteract = \ctx nm _ -> isOwner un ctx nm
-    , canDelete   = isOwner un
     }
+      -- canDelete = \ctx nm _ -> isOwner un ctx nm 
+      -- Omit as a default. I prefer delete not work and the programmer have to
+      -- figure out why rather than being surprised that resources are disappearing!
+
+class DefaultPermissions x where
+  permissions :: Maybe Username -> Permissions x
+  default permissions :: Ownable x => Maybe Username -> Permissions x
+  permissions = defaultPermissions
+
+instance {-# INCOHERENT #-} Ownable x => DefaultPermissions x

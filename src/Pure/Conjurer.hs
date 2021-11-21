@@ -17,6 +17,7 @@ import Pure.Conjurer.Previewable as Export
 import Pure.Conjurer.Previews as Export
 import Pure.Conjurer.Producible as Export
 import Pure.Conjurer.Readable as Export
+import Pure.Conjurer.Rep as Export
 import Pure.Conjurer.Resource as Export
 import Pure.Conjurer.Rootable as Export
 import Pure.Conjurer.Routable as Export 
@@ -27,11 +28,11 @@ import Pure.Data.JSON (ToJSON(..),FromJSON(..),encodeBS,decodeBS)
 import Pure.Data.Render ()
 import Pure.Data.Txt as Txt
 import Pure.Elm.Application (storeScrollPosition)
-import Pure.Elm.Component (View,HasFeatures,pattern OnClickWith,intercept,pattern Href,pattern OnTouchStart,pattern OnMouseDown,Theme(..),pattern Themed,(|>),(<|),pattern Div,Component(run))
+import Pure.Elm.Component (Default,View,HasFeatures,pattern OnClickWith,intercept,pattern Href,pattern OnTouchStart,pattern OnMouseDown,Theme(..),pattern Themed,(|>),(<|),pattern Div,Component(run))
 import Pure.Router as Router (Routing,goto)
 import Pure.Sorcerer as Sorcerer hiding (Read,pattern Update)
 import qualified Pure.Sorcerer as Sorcerer
-import Pure.WebSocket as WS hiding (Index,identify)
+import Pure.WebSocket as WS hiding (Index,identify,rep)
 import Pure.WebSocket.Cache
 
 import Data.ByteString.Lazy (ByteString)
@@ -57,21 +58,18 @@ import Unsafe.Coerce
 import Prelude hiding (Read)
 
 type Conjurable a =
-    ( Typeable a
-    , Processable a
-    , Producible a
-    , Previewable a
-    , Amendable a
-    , Nameable a
-    , ToJSON (Context a), FromJSON (Context a), Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , ToJSON (Name a), FromJSON (Name a), Pathable (Name a), Hashable (Name a), Ord (Name a)
-    , ToJSON (Resource a), FromJSON (Resource a)
-    , ToJSON (Product a), FromJSON (Product a)
-    , ToJSON (Preview a), FromJSON (Preview a)
-    , ToJSON (Action a), FromJSON (Action a)
-    , ToJSON (Reaction a), FromJSON (Reaction a)
-    , ToJSON (Amend a), FromJSON (Amend a)
-    )
+  ( Typeable a
+  , Amendable a
+  , Nameable a
+  , ToJSON (Context a), FromJSON (Context a), Pathable (Context a), Hashable (Context a), Ord (Context a)
+  , ToJSON (Name a), FromJSON (Name a), Pathable (Name a), Hashable (Name a), Ord (Name a)
+  , ToJSON (Resource a), FromJSON (Resource a)
+  , ToJSON (Product a), FromJSON (Product a)
+  , ToJSON (Preview a), FromJSON (Preview a)
+  , ToJSON (Action a), FromJSON (Action a)
+  , ToJSON (Reaction a), FromJSON (Reaction a)
+  , ToJSON (Amend a), FromJSON (Amend a)
+  )
 
 --------------------------------------------------------------------------------  
 
@@ -130,7 +128,8 @@ getResourceLocks =
 -- I have a feeling I'll be back here soon, cursing myself. Apologies, in advance.
 --
 withLock :: forall a b. (Ord (Context a), Ord (Name a), Typeable a) => Context a -> Name a -> IO b -> IO b
-withLock ctx nm f = getResourceLocks @a >>= start
+withLock ctx nm f = do
+  getResourceLocks @a >>= start
   where 
     cleanup rqs_ = do
       join $ atomically do
@@ -200,10 +199,15 @@ tryCreate Permissions {..} Callbacks {..} ctx a0 = do
               (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
               (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
               Sorcerer.write (IndexStream @a) (ResourceAdded ctx name)
-              (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
+              (Sorcerer.Update (Previews (lst :: [(Name a,Preview a)]))) <- 
                 Sorcerer.transact (PreviewsStream ctx) (SetPreviewItem name pre)
-              onCreate ctx name new pro pre
-              pure (Just (name,pro,pre,previews))
+              caching <- isCaching @a
+              when caching do
+                cacheProduct ctx name pro
+                cachePreview ctx name pre
+                cacheListing ctx lst
+              onCreate ctx name new pro pre lst
+              pure (Just (name,pro,pre,lst))
             _ ->
               pure Nothing
       else
@@ -236,10 +240,15 @@ tryUpdate Permissions {..} Callbacks {..} ctx name a0 = do
               pre <- preview False ctx name new pro
               (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
               (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
-              (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
+              (Sorcerer.Update (Previews (lst :: [(Name a,Preview a)]))) <- 
                 Sorcerer.transact (PreviewsStream ctx) (SetPreviewItem name pre)
-              onUpdate ctx name new pro pre
-              pure (Just (pro,pre,previews))
+              caching <- isCaching @a
+              when caching do
+                cacheProduct ctx name pro
+                cachePreview ctx name pre
+                cacheListing ctx lst
+              onUpdate ctx name new pro pre lst
+              pure (Just (pro,pre,lst))
             _ ->
               pure Nothing
       else
@@ -268,10 +277,15 @@ tryAmend Permissions {..} Callbacks {..} ctx name a = do
           pre <- preview False ctx name new pro
           (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
           (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
-          (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
+          (Sorcerer.Update (Previews (lst :: [(Name a,Preview a)]))) <- 
             Sorcerer.transact (PreviewsStream ctx) (SetPreviewItem name pre)
-          onAmend ctx name new pro pre a
-          pure (Just (pro,pre,previews))
+          caching <- isCaching @a
+          when caching do
+            cacheProduct ctx name pro
+            cachePreview ctx name pre
+            cacheListing ctx lst
+          onAmend ctx name new pro pre lst a
+          pure (Just (pro,pre,lst))
         _ ->
           pure Nothing
   else
@@ -298,10 +312,15 @@ tryDelete Permissions {..} Callbacks {..} ctx name = do
         Deleted r -> do
           Deleted pre <- Sorcerer.observe (PreviewStream ctx name) DeletePreview
           Deleted pro <- Sorcerer.observe (ProductStream ctx name) DeleteProduct
-          (Sorcerer.Update (Previews (previews :: [(Name a,Preview a)]))) <- 
+          (Sorcerer.Update (Previews (lst :: [(Name a,Preview a)]))) <- 
             Sorcerer.transact (PreviewsStream ctx) (DeletePreviewItem name)
-          onDelete ctx name r pro pre
-          pure (Just (pro,pre,previews))
+          onDelete ctx name r pro pre lst
+          caching <- isCaching @a
+          when caching do
+            deleteProduct ctx name
+            deletePreview ctx name
+            cacheListing ctx lst
+          pure (Just (pro,pre,lst))
         _ -> do
           pure Nothing
   else
@@ -364,11 +383,12 @@ tryReadProduct Permissions {..} Callbacks {..} ctx name = do
   if can then do
     mpro <- Sorcerer.read (ProductStream ctx name)
     case mpro of
-      Nothing -> pure Nothing
+      Nothing -> do
+        pure Nothing
       Just pro -> do
         onRead ctx name pro
         pure (Just pro)
-  else
+  else do
     pure Nothing
 
 tryReadListing
@@ -451,8 +471,8 @@ reading ::
   , ToJSON (Preview a), FromJSON (Preview a)
   , ToJSON (Context a), FromJSON (Context a)
   , ToJSON (Name a), FromJSON (Name a)
-  , Pathable (Context a), Hashable (Context a)
-  , Pathable (Name a), Hashable (Name a), Eq (Name a)
+  , Pathable (Context a), Hashable (Context a), Ord (Context a)
+  , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
   ) => Permissions a -> Callbacks a 
     -> Endpoints '[] (ReadingAPI a) '[] (ReadingAPI a)
 reading ps cs = Endpoints readingAPI msgs reqs
@@ -645,13 +665,20 @@ handleReadProduct
     , ToJSON (Product a), FromJSON (Product a)
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
-    , Pathable (Context a), Hashable (Context a)
-    , Pathable (Name a), Hashable (Name a)
+    , Pathable (Context a), Hashable (Context a), Ord (Context a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     ) => Permissions a -> Callbacks a -> RequestHandler (ReadProduct a)
 handleReadProduct permissions callbacks = responding do
   (ctx,name) <- acquire
-  response <- liftIO (tryReadProduct permissions callbacks ctx name)
-  reply response
+  caching <- liftIO (isCaching @a)
+  if caching then do
+    response <- liftIO (tryReadProductFromCache permissions callbacks ctx name)
+    case response of
+      Just rsp -> customReplyRaw rsp
+      Nothing  -> reply Nothing
+  else do
+    response <- liftIO (tryReadProduct permissions callbacks ctx name)
+    reply response
 
 handleReadPreview
   :: forall a. 
@@ -659,33 +686,48 @@ handleReadPreview
     , ToJSON (Preview a), FromJSON (Preview a)
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
-    , Pathable (Context a), Hashable (Context a)
-    , Pathable (Name a), Hashable (Name a)
+    , Pathable (Context a), Hashable (Context a), Ord (Context a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     ) => Permissions a -> Callbacks a -> RequestHandler (ReadPreview a)
 handleReadPreview permissions callbacks = responding do
   (ctx,name) <- acquire
-  response <- liftIO (tryReadPreview permissions callbacks ctx name)
-  reply response
+  caching <- liftIO (isCaching @a)
+  if caching then do
+    response <- liftIO (tryReadPreviewFromCache permissions callbacks ctx name)
+    case response of
+      Just rsp -> customReplyRaw rsp
+      Nothing  -> reply Nothing
+  else do
+    response <- liftIO (tryReadPreview permissions callbacks ctx name)
+    reply response
 
 handleReadListing
   :: forall a. 
     ( Typeable a
     , ToJSON (Preview a), FromJSON (Preview a)
-    , ToJSON (Context a), FromJSON (Context a)
+    , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Pathable (Context a), Hashable (Context a), Eq (Name a)
     ) => Permissions a -> Callbacks a -> RequestHandler (ReadListing a)
 handleReadListing permissions callbacks = responding do
   ctx <- acquire
-  response <- liftIO (tryReadListing permissions callbacks ctx)
-  reply response
+  caching <- liftIO (isCaching @a)
+  if caching then do
+    response <- liftIO (tryReadListingFromCache permissions callbacks ctx)
+    case response of
+      Just rsp -> customReplyRaw rsp
+      Nothing  -> reply Nothing
+  else do
+    response <- liftIO (tryReadListing permissions callbacks ctx)
+    reply response
 
 --------------------------------------------------------------------------------
 
 data ResponseMap = ResponseMap (Map Any (IORef ByteString))
 
 data Cache = Cache 
-  { previews :: IORef (Map TypeRep (IORef ResponseMap))
+  { table    :: IORef (Set TypeRep) 
+  , previews :: IORef (Map TypeRep (IORef ResponseMap))
   , products :: IORef (Map TypeRep (IORef ResponseMap))
   , listings :: IORef (Map TypeRep (IORef ResponseMap))
   }
@@ -694,9 +736,21 @@ data Cache = Cache
 conjurerCache :: Cache 
 conjurerCache = unsafePerformIO do
   Cache 
-    <$> newIORef Map.empty 
+    <$> newIORef Set.empty
+    <*> newIORef Map.empty 
     <*> newIORef Map.empty
     <*> newIORef Map.empty
+
+isCaching :: forall a. Typeable a => IO Bool
+isCaching =
+  let ty = typeOf (undefined :: a)
+  in fmap (Set.member ty) (readIORef (table conjurerCache))
+
+setCaching :: forall a. Typeable a => IO ()
+setCaching =
+  let ty = typeOf (undefined :: a)
+  in atomicModifyIORef' (table conjurerCache) $ \s -> 
+    (Set.insert ty s,())
 
 cache 
   :: forall resource. 
@@ -709,6 +763,8 @@ cache
     , Ord (Context resource), Hashable (Context resource), Pathable (Context resource)
     ) => IO ()
 cache = do
+  setCaching @resource
+  
   contexts <- newIORef Set.empty
 
   Export.iterate @resource $ \ctx nm -> do
@@ -783,7 +839,8 @@ tryReadProductFromCache Permissions {..} Callbacks {..} ctx nm = do
     let ty = typeOf (undefined :: ReadProduct a)
     ps <- readIORef (products conjurerCache) 
     case Map.lookup ty ps of
-      Nothing -> pure Nothing
+      Nothing -> do
+        pure Nothing
       Just pros_ -> do
         ResponseMap pros <- readIORef pros_
         case Map.lookup (ctx,nm) (unsafeCoerce pros) of
@@ -791,9 +848,9 @@ tryReadProductFromCache Permissions {..} Callbacks {..} ctx nm = do
             bs <- readIORef bs_
             onRead ctx nm (fromJust (decodeBS bs)) -- this will error if `decode . encode /= Just`
             pure (Just bs)
-          _ -> 
+          _ -> do
             pure Nothing
-  else
+  else do 
     pure Nothing
 
 cachePreview
@@ -916,204 +973,6 @@ tryReadListingFromCache Permissions {..} Callbacks {..} ctx = do
   else
     pure Nothing
 
-cachingPublishing :: 
-  ( Typeable a
-  , Processable a, Amendable a, Nameable a, Previewable a, Producible a 
-  , ToJSON (Action a), FromJSON (Action a)
-  , ToJSON (Reaction a), FromJSON (Reaction a)
-  , ToJSON (Resource a), FromJSON (Resource a)
-  , ToJSON (Product a), FromJSON (Product a)
-  , ToJSON (Preview a), FromJSON (Preview a)
-  , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
-  , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
-  , Pathable (Context a), Hashable (Context a)
-  , Pathable (Name a), Hashable (Name a), Eq (Name a)
-  , FromJSON (Amend a), ToJSON (Amend a)
-  ) => Permissions a -> Callbacks a -> Interactions a
-    -> Endpoints '[] (PublishingAPI a) '[] (PublishingAPI a)
-cachingPublishing ps cs i = Endpoints publishingAPI msgs reqs
-  where
-    msgs = WS.none
-    reqs = handleCachingCreateResource ps cs 
-       <:> handleReadResource ps cs
-       <:> handleCachingUpdateResource ps cs
-       <:> handleCachingDeleteResource ps cs
-       <:> handlePreviewResource ps cs
-       <:> handleCachingAmendResource ps cs
-       <:> handlePreviewAmendResource ps cs
-       <:> handleInteractResource ps cs i
-       <:> WS.none
-
-cachingReading :: 
-  ( Typeable a
-  , ToJSON (Product a), FromJSON (Product a)
-  , ToJSON (Preview a), FromJSON (Preview a)
-  , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
-  , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
-  , Pathable (Context a), Hashable (Context a)
-  , Pathable (Name a), Hashable (Name a), Eq (Name a)
-  ) => Permissions a -> Callbacks a 
-    -> Endpoints '[] (ReadingAPI a) '[] (ReadingAPI a)
-cachingReading ps cs = Endpoints readingAPI msgs reqs
-  where
-    msgs = WS.none
-    reqs = handleCachingReadProduct ps cs 
-       <:> handleCachingReadPreview ps cs
-       <:> handleCachingReadListing ps cs
-       <:> WS.none
-
-handleCachingCreateResource 
-  :: forall a. 
-    ( Typeable a
-    , Processable a, Amendable a, Nameable a, Producible a, Previewable a
-    , ToJSON (Resource a), FromJSON (Resource a)
-    , ToJSON (Product a), FromJSON (Product a)
-    , ToJSON (Preview a), FromJSON (Preview a)
-    , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
-    , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
-    , Pathable (Context a), Hashable (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a)
-    , FromJSON (Amend a), ToJSON (Amend a)
-    ) => Permissions a -> Callbacks a -> RequestHandler (CreateResource a)
-handleCachingCreateResource permissions callbacks = responding do
-  (ctx,resource) <- acquire
-  response <- liftIO do
-    tryCreate permissions callbacks ctx resource >>= \case
-      Just (name,pro,pre,lst) -> do
-        cacheProduct ctx name pro
-        cachePreview ctx name pre
-        cacheListing ctx lst
-        pure (Just name)
-      _ -> 
-        pure Nothing
-  reply response
-
-handleCachingUpdateResource
-  :: forall a. 
-    ( Typeable a
-    , Processable a, Amendable a, Nameable a, Producible a, Previewable a
-    , ToJSON (Resource a), FromJSON (Resource a) 
-    , ToJSON (Product a), FromJSON (Product a)
-    , ToJSON (Preview a), FromJSON (Preview a)
-    , ToJSON (Context a), FromJSON (Context a)
-    , ToJSON (Name a), FromJSON (Name a)
-    , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
-    , FromJSON (Amend a), ToJSON (Amend a)
-    ) => Permissions a -> Callbacks a -> RequestHandler (UpdateResource a)
-handleCachingUpdateResource permissions callbacks = responding do
-  (ctx,name,resource) <- acquire
-  response <- liftIO do
-    result <- tryUpdate permissions callbacks ctx name resource
-    case result of
-      Nothing -> pure False
-      Just (pro,pre,lst) -> do
-        cacheProduct ctx name pro
-        cachePreview ctx name pre
-        cacheListing ctx lst
-        pure True
-  reply response
-
-handleCachingDeleteResource
-  :: forall a. 
-    ( Typeable a
-    , Amendable a
-    , ToJSON (Resource a), FromJSON (Resource a) 
-    , ToJSON (Product a), FromJSON (Product a)
-    , ToJSON (Preview a), FromJSON (Preview a)
-    , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
-    , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
-    , Pathable (Context a), Hashable (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a)
-    , FromJSON (Amend a), ToJSON (Amend a)
-    ) => Permissions a -> Callbacks a -> RequestHandler (DeleteResource a)
-handleCachingDeleteResource permissions callbacks = responding do
-  (ctx,name) <- acquire
-  response <- liftIO do
-     result <- tryDelete permissions callbacks ctx name
-     case result of
-       Nothing -> pure False
-       Just (pro,pre,lst) -> do
-        deleteProduct ctx name
-        deletePreview ctx name
-        cacheListing ctx lst
-        pure True
-  reply response
-
-handleCachingAmendResource
-  :: forall a. 
-    ( Typeable a
-    , Amendable a, Producible a, Previewable a
-    , ToJSON (Resource a), FromJSON (Resource a) 
-    , ToJSON (Product a), FromJSON (Product a)
-    , ToJSON (Preview a), FromJSON (Preview a)
-    , ToJSON (Context a), FromJSON (Context a)
-    , ToJSON (Name a), FromJSON (Name a)
-    , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
-    , FromJSON (Amend a), ToJSON (Amend a)
-    ) => Permissions a -> Callbacks a -> RequestHandler (AmendResource a)
-handleCachingAmendResource permissions callbacks = responding do
-  (ctx,name,amend) <- acquire
-  response <- liftIO do
-    result <- tryAmend permissions callbacks ctx name amend
-    case result of
-      Nothing -> pure False
-      Just (pro,pre,lst) -> do
-        cacheProduct ctx name pro
-        cachePreview ctx name pre
-        cacheListing ctx lst
-        pure True
-  reply response
-
-handleCachingReadProduct
-  :: forall a. 
-    ( Typeable a
-    , ToJSON (Product a), FromJSON (Product a)
-    , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
-    , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
-    , Pathable (Context a), Hashable (Context a)
-    , Pathable (Name a), Hashable (Name a)
-    ) => Permissions a -> Callbacks a -> RequestHandler (ReadProduct a)
-handleCachingReadProduct permissions callbacks = responding do
-  (ctx,name) <- acquire
-  response <- liftIO (tryReadProductFromCache permissions callbacks ctx name)
-  case response of
-    Just rsp -> customReplyRaw rsp
-    Nothing -> reply Nothing
-
-handleCachingReadPreview
-  :: forall a. 
-    ( Typeable a
-    , ToJSON (Preview a), FromJSON (Preview a)
-    , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
-    , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
-    , Pathable (Context a), Hashable (Context a)
-    , Pathable (Name a), Hashable (Name a)
-    ) => Permissions a -> Callbacks a -> RequestHandler (ReadPreview a)
-handleCachingReadPreview permissions callbacks = responding do
-  (ctx,name) <- acquire
-  response <- liftIO (tryReadPreviewFromCache permissions callbacks ctx name)
-  case response of
-    Just rsp -> customReplyRaw rsp
-    Nothing  -> reply Nothing
-
-handleCachingReadListing
-  :: forall a. 
-    ( Typeable a
-    , ToJSON (Preview a), FromJSON (Preview a)
-    , ToJSON (Context a), FromJSON (Context a)
-    , ToJSON (Name a), FromJSON (Name a)
-    , Pathable (Context a), Hashable (Context a), Eq (Name a)
-    , Ord (Context a)
-    ) => Permissions a -> Callbacks a -> RequestHandler (ReadListing a)
-handleCachingReadListing permissions callbacks = responding do
-  ctx <- acquire
-  response <- liftIO (tryReadListingFromCache permissions callbacks ctx)
-  case response of
-    Just rsp -> customReplyRaw rsp
-    Nothing  -> reply Nothing
-
 customReplyRaw :: ByteString -> Responding rq rsp ()
 #ifdef __GHCJS__
 customReplyRaw = replyRaw . toTxt
@@ -1128,6 +987,29 @@ data Route a
   | ListR (Context a)
   | CreateR (Context a)
   | UpdateR (Context a) (Name a)
+
+-- Erases a resource type; useful for cases that deal across resource domains, 
+-- like navigational headers that need to match the route to, e.g. highlight
+-- an active menu based on the route/resource.
+data SomeRoute _role
+  = forall resource. 
+    ( Typeable resource
+    , Theme resource
+    , Routable resource
+    , FromJSON (Resource resource), ToJSON (Resource resource), Default (Resource resource)
+    , FromJSON (Context resource), ToJSON (Context resource), Pathable (Context resource), Eq (Context resource)
+    , FromJSON (Name resource), ToJSON (Name resource), Pathable (Name resource), Eq (Name resource)
+    , FromJSON (Preview resource)
+    , FromJSON (Product resource)
+    , Formable (Resource resource)
+    , Readable resource
+    , Updatable _role resource
+    , Listable resource
+    , Creatable _role resource
+    ) => SomeRoute (Route resource)
+
+fromSomeRoute :: forall _role resource. Typeable resource => SomeRoute _role -> Maybe (Route resource)
+fromSomeRoute (SomeRoute rt) = cast rt
 
 {- 
 -- I have a feeling these are expensive.

@@ -74,7 +74,6 @@ cachingToList shouldPreloadPreviews _ ctx =
       rsp <- req Cached (readingAPI @resource)
         (readListing @resource) 
         ctx
-      print ("Got response in cachingToList" :: Txt)
       pure rsp
 
     consumer ctx ps = 

@@ -1,5 +1,7 @@
 module Pure.Conjurer.Rootable where
 
+import Pure.Conjurer.Rep
+
 import Pure.Data.Txt as Txt
 
 import Data.Typeable
@@ -7,6 +9,6 @@ import Data.Typeable
 class Rootable a where
   root :: Txt
   default root :: Typeable a => Txt
-  root = "/" <> Txt.toLower (toTxt (show (typeRepTyCon (typeOf (undefined :: a)))))
+  root = "/" <> Txt.toLower (rep @a)
 
 instance {-# INCOHERENT #-} Typeable a => Rootable a
