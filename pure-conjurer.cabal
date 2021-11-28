@@ -19,6 +19,7 @@ library
   build-depends:
       base
     , pure-auth
+    , pure-bloom
     , pure-default
     , pure-elm
     , pure-hooks

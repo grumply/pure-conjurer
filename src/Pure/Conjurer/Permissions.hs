@@ -17,6 +17,7 @@ data Permissions resource = Permissions
   , canDelete   :: Context resource -> Name resource -> IO Bool
   , canRead     :: Context resource -> Name resource -> IO Bool
   , canList     :: Context resource -> IO Bool
+  , canEnum     :: IO Bool
   }
 
 noPermissions :: Permissions resource
@@ -28,6 +29,7 @@ noPermissions = Permissions
   , canDelete   = \_ _ -> pure False
   , canRead     = \_ _ -> pure False
   , canList     = \_   -> pure False
+  , canEnum     = pure False
   }
 
 fullPermissions :: Permissions resource
@@ -39,6 +41,7 @@ fullPermissions = Permissions
   , canDelete   = \_ _ -> pure True
   , canRead     = \_ _ -> pure True
   , canList     = \_   -> pure True
+  , canEnum     = pure True
   }
 
 readPermissions :: Permissions resource
@@ -50,6 +53,7 @@ readPermissions = Permissions
   , canDelete   = \_ _ -> pure False
   , canRead     = \_ _ -> pure True
   , canList     = \_   -> pure True
+  , canEnum     = pure True
   }
 
 defaultPermissions :: Ownable resource => Maybe Username -> Permissions resource
