@@ -51,7 +51,7 @@ instance
   , ToJSON (ResourceMsg a), FromJSON (ResourceMsg a)
   , Hashable (Context a), Pathable (Context a)
   , Hashable (Name a), Pathable (Name a)
-  ) => Source (ResourceMsg a) 
+  ) => Streamable (ResourceMsg a) 
   where
     data Stream (ResourceMsg a) = ResourceStream (Context a) (Name a)
       deriving stock Generic
@@ -63,6 +63,10 @@ instance
         ++ fromTxt (toPath nm)
         ++ ".stream"
 
+deriving instance (Eq (Context a), Eq (Name a))
+  => Eq (Stream (ResourceMsg a))
+deriving instance (Ord (Context a), Ord (Name a))
+  => Ord (Stream (ResourceMsg a))
 deriving instance (Hashable (Context a), Hashable (Name a)) 
   => Hashable (Stream (ResourceMsg a))
   

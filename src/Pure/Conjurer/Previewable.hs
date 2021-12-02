@@ -1,4 +1,4 @@
-module Pure.Conjurer.Previewable (Stream(..),Preview(..),PreviewMsg(..),Previewable(..)) where
+module Pure.Conjurer.Previewable (Streamable(..),Stream(..),Preview(..),PreviewMsg(..),Previewable(..)) where
 
 import Pure.Conjurer.Context
 import Pure.Conjurer.Name
@@ -48,7 +48,7 @@ instance
   , ToJSON (PreviewMsg a), FromJSON (PreviewMsg a)
   , Hashable (Context a), Pathable (Context a)
   , Hashable (Name a), Pathable (Name a)
-  ) => Source (PreviewMsg a) 
+  ) => Streamable (PreviewMsg a) 
   where
     data Stream (PreviewMsg a) = PreviewStream (Context a) (Name a)
       deriving stock Generic
@@ -60,6 +60,10 @@ instance
         ++ fromTxt (toPath nm)
         ++ ".stream"
 
+deriving instance (Eq (Context a), Eq (Name a)) 
+  => Eq (Stream (PreviewMsg a))
+deriving instance (Ord (Context a), Ord (Name a)) 
+  => Ord (Stream (PreviewMsg a))
 deriving instance (Hashable (Context a), Hashable (Name a)) 
   => Hashable (Stream (PreviewMsg a))
 

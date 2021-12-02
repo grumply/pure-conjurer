@@ -82,17 +82,16 @@ conjure
     , ToJSON (Product a), FromJSON (Product a)
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
-    , Pathable (Context a), Hashable (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a)
+    , Pathable (Context a), Hashable (Context a), Ord (Context a)
+    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
-    ) => [Listener]
-conjure = 
-  [ listener @(ResourceMsg a) @(Resource a)
-  , listener @(IndexMsg a) @(Index a)
-  , listener @(ProductMsg a) @(Product a)
-  , listener @(PreviewMsg a) @(Preview a)
-  , listener @(PreviewsMsg a) @(Previews a)
-  ]
+    ) => IO ()
+conjure = do
+  sorcerer @(ResourceMsg a) @'[Resource a]
+  sorcerer @(IndexMsg a) @'[Index a]
+  sorcerer @(ProductMsg a) @'[Product a]
+  sorcerer @(PreviewMsg a) @'[Preview a]
+  sorcerer @(PreviewsMsg a) @'[Previews a]
 
 type Queue = TMVar (TQueue (IO ()))
 
@@ -331,8 +330,8 @@ tryReadResource
     ( Typeable a
     , Amendable a
     , ToJSON (Resource a), FromJSON (Resource a)
-    , Hashable (Context a), Pathable (Context a)
-    , Hashable (Name a), Pathable (Name a)
+    , Hashable (Context a), Pathable (Context a), Ord (Context a)
+    , Hashable (Name a), Pathable (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> Context a -> Name a -> IO (Maybe (Resource a))
 tryReadResource Permissions {..} Callbacks {..} ctx name = do
@@ -356,8 +355,8 @@ tryReadPreview
   :: forall a.
     ( Typeable a
     , ToJSON (Preview a), FromJSON (Preview a)
-    , Pathable (Context a), Hashable (Context a)
-    , Pathable (Name a), Hashable (Name a)
+    , Pathable (Context a), Hashable (Context a), Ord (Context a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     ) => Permissions a -> Callbacks a -> Context a -> Name a -> IO (Maybe (Preview a))
 tryReadPreview Permissions {..} Callbacks {..} ctx name = do
   can <- canRead ctx name
@@ -375,8 +374,8 @@ tryReadProduct
   :: forall a.
     ( Typeable a
     , ToJSON (Product a), FromJSON (Product a)
-    , Pathable (Context a), Hashable (Context a)
-    , Pathable (Name a), Hashable (Name a)
+    , Pathable (Context a), Hashable (Context a), Ord (Context a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     ) => Permissions a -> Callbacks a -> Context a -> Name a -> IO (Maybe (Product a))
 tryReadProduct Permissions {..} Callbacks {..} ctx name = do
   can <- canRead ctx name
@@ -395,7 +394,7 @@ tryReadListing
   :: forall a.
     ( Typeable a
     , ToJSON (Preview a), FromJSON (Preview a)
-    , Pathable (Context a), Hashable (Context a)
+    , Pathable (Context a), Hashable (Context a), Ord (Context a)
     , ToJSON (Name a), FromJSON (Name a), Eq (Name a)
     ) => Permissions a -> Callbacks a -> Context a -> IO (Maybe [(Name a,Preview a)])
 tryReadListing Permissions {..} Callbacks {..} ctx = do
@@ -419,8 +418,8 @@ tryInteract
     , ToJSON (Amend a)
     , FromJSON (Resource a), ToJSON (Resource a)
     , FromJSON (Amend a), ToJSON (Amend a)
-    , Hashable (Context a), Pathable (Context a)
-    , Hashable (Name a), Pathable (Name a)
+    , Hashable (Context a), Pathable (Context a), Ord (Context a)
+    , Hashable (Name a), Pathable (Name a), Ord (Name a)
     ) => Permissions a -> Callbacks a -> Interactions a -> Context a -> Name a -> Action a -> IO (Maybe (Reaction a))
 tryInteract Permissions {..} Callbacks {..} Interactions {..} ctx name action = do
   can <- canInteract ctx name action
@@ -511,8 +510,8 @@ handleReadResource
     , ToJSON (Resource a), FromJSON (Resource a) 
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
-    , Hashable (Context a), Pathable (Context a)
-    , Hashable (Name a), Pathable (Name a)
+    , Hashable (Context a), Pathable (Context a), Ord (Context a)
+    , Hashable (Name a), Pathable (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> RequestHandler (ReadResource a)
 handleReadResource permissions callbacks = responding do
@@ -601,8 +600,8 @@ handlePreviewAmendResource
     , ToJSON (Preview a), FromJSON (Preview a)
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
-    , Pathable (Context a), Hashable (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a)
+    , Pathable (Context a), Hashable (Context a), Ord (Context a)
+    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
     , ToJSON (Amend a), FromJSON (Amend a)
     ) => Permissions a -> Callbacks a -> RequestHandler (PreviewAmendResource a)
 handlePreviewAmendResource permissions callbacks = responding do
@@ -631,8 +630,8 @@ handleInteractResource
     , FromJSON (Resource a), ToJSON (Resource a)
     , FromJSON (Action a)
     , ToJSON (Reaction a)
-    , FromJSON (Context a), Hashable (Context a), Pathable (Context a)
-    , FromJSON (Name a), Hashable (Name a), Pathable (Name a)
+    , FromJSON (Context a), Hashable (Context a), Pathable (Context a), Ord (Context a)
+    , FromJSON (Name a), Hashable (Name a), Pathable (Name a), Ord (Name a)
     ) => Permissions a -> Callbacks a -> Interactions a -> RequestHandler (InteractResource a)
 handleInteractResource permissions callbacks interaction = responding do
   (ctx,name,action) <- acquire
@@ -759,8 +758,8 @@ cache
     , ToJSON (Preview resource), FromJSON (Preview resource)
     , ToJSON (Context resource), FromJSON (Context resource)
     , ToJSON (Name resource), FromJSON (Name resource)
-    , Ord (Name resource), Hashable (Name resource), Pathable (Name resource)
-    , Ord (Context resource), Hashable (Context resource), Pathable (Context resource)
+    , Ord (Name resource), Hashable (Name resource), Pathable (Name resource), Ord (Name resource)
+    , Ord (Context resource), Hashable (Context resource), Pathable (Context resource), Ord (Context resource)
     ) => IO ()
 cache = do
   setCaching @resource
@@ -1105,8 +1104,8 @@ generateStatic
   :: forall a. 
     ( Typeable a
     , Routable a
-    , ToJSON (Name a), FromJSON (Name a), Hashable (Name a), Pathable (Name a)
-    , ToJSON (Context a), FromJSON (Context a), Hashable (Context a), Pathable (Context a)
+    , ToJSON (Name a), FromJSON (Name a), Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , ToJSON (Context a), FromJSON (Context a), Hashable (Context a), Pathable (Context a), Ord (Context a)
     , ToJSON (Product a), FromJSON (Product a)
     , Component (Product a)
     ) => WebSocket -> IO ()
@@ -1120,8 +1119,8 @@ generateStaticWith
   :: forall a. 
     ( Typeable a
     , Routable a
-    , ToJSON (Name a), FromJSON (Name a), Hashable (Name a), Pathable (Name a)
-    , ToJSON (Context a), FromJSON (Context a), Hashable (Context a), Pathable (Context a)
+    , ToJSON (Name a), FromJSON (Name a), Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , ToJSON (Context a), FromJSON (Context a), Hashable (Context a), Pathable (Context a), Ord (Context a)
     , ToJSON (Product a), FromJSON (Product a)
     ) => FilePath -> (Product a -> IO Txt) -> WebSocket -> IO ()
 generateStaticWith path template ws = do

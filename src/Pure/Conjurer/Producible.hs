@@ -49,7 +49,7 @@ instance
   , ToJSON (ProductMsg a), FromJSON (ProductMsg a)
   , Hashable (Context a), Pathable (Context a)
   , Hashable (Name a), Pathable (Name a)
-  ) => Source (ProductMsg a) 
+  ) => Streamable (ProductMsg a) 
   where
     data Stream (ProductMsg a) = ProductStream (Context a) (Name a)
       deriving stock Generic
@@ -61,6 +61,10 @@ instance
         ++ fromTxt (toPath nm)
         ++ ".stream"
 
+deriving instance (Eq (Context a), Eq (Name a)) 
+  => Eq (Stream (ProductMsg a))
+deriving instance (Ord (Context a), Ord (Name a)) 
+  => Ord (Stream (ProductMsg a))
 deriving instance (Hashable (Context a), Hashable (Name a)) 
   => Hashable (Stream (ProductMsg a))
   

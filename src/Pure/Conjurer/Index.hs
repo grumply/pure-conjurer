@@ -1,4 +1,4 @@
-module Pure.Conjurer.Index where
+module Pure.Conjurer.Index (Stream(..),Index(..),IndexMsg(..),Context(..),Name(..),iterate) where
 
 import Pure.Conjurer.Context
 import Pure.Conjurer.Resource
@@ -13,6 +13,8 @@ import Data.Hashable
 import Data.Foldable
 import Data.Typeable
 import GHC.Generics
+
+import Prelude hiding (iterate)
 
 data Index a = Index
   deriving stock Generic
@@ -31,10 +33,10 @@ deriving instance (FromJSON (Context a), FromJSON (Name a))
 instance 
   ( Typeable a
   , ToJSON (IndexMsg a), FromJSON (IndexMsg a)
-  ) => Source (IndexMsg a) 
+  ) => Streamable (IndexMsg a) 
   where
     data Stream (IndexMsg a) = IndexStream 
-      deriving stock Generic
+      deriving stock (Generic,Eq,Ord)
       deriving anyclass (Hashable,ToJSON,FromJSON)
       
     stream IndexStream = 
