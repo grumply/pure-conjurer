@@ -9,7 +9,7 @@ import Pure.Data.Txt
 import Pure.Data.Time
 import Pure.Data.Marker
 import Pure.Router (route)
-import Pure.Elm.Component (timed,HasCallStack,Default(..))
+import Pure.Elm.Component (Default(..))
 import Pure.Sorcerer hiding (events)
 import qualified Pure.Sorcerer as Sorcerer
 import Pure.WebSocket as WS hiding (Nat,rep)
@@ -750,9 +750,8 @@ buildPopularForNamespace
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a), ToJSON (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a), ToJSON (Name a)
-    , HasCallStack
     ) => IO [(Context a,Name a)]
-buildPopularForNamespace = timed do
+buildPopularForNamespace = do
   Milliseconds (fromIntegral -> now) _ <- time
   c <- fromIntegral <$> analyticsCountForNamespace @a
   ctxnms <- listUnique @a
@@ -802,9 +801,8 @@ buildTopForNamespace
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    , HasCallStack
     ) => IO [(Context a,Name a)]
-buildTopForNamespace = timed do
+buildTopForNamespace = do
   c <- fromIntegral <$> analyticsCountForNamespace @a
   ctxnms <- listUnique @a
   counts <- Map.toList <$> foldM withContextAndName Map.empty ctxnms
@@ -848,9 +846,8 @@ buildRecentForNamespace
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    , HasCallStack
     ) => IO [(Context a,Name a)]
-buildRecentForNamespace = timed do
+buildRecentForNamespace = do
   ctxs <- listUniqueContexts @a
   ages <- Map.toList <$> foldM withContext Map.empty ctxs
   let
@@ -872,9 +869,8 @@ buildPopularForContext
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    , HasCallStack
     ) => Context a -> IO [(Context a,Name a)]
-buildPopularForContext ctx = timed do
+buildPopularForContext ctx = do
   Milliseconds (fromIntegral -> now) _ <- time
   c <- fromIntegral <$> analyticsCountForNamespace @a
   nms <- listUniqueResources ctx
@@ -924,9 +920,8 @@ buildTopForContext
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    , HasCallStack
     ) => Context a -> IO [(Context a,Name a)]
-buildTopForContext ctx = timed do
+buildTopForContext ctx = do
   c <- fromIntegral <$> analyticsCountForNamespace @a
   nms <- listUniqueResources ctx
   counts <- Map.toList <$> foldM withResource Map.empty nms
@@ -968,9 +963,8 @@ buildRecentForContext
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    , HasCallStack
     ) => Context a -> IO [(Context a,Name a)]
-buildRecentForContext ctx = timed do
+buildRecentForContext ctx = do
   nms <- listUniqueResources ctx
   ages <- Map.toList <$> foldM withResource Map.empty nms
   let
@@ -989,9 +983,8 @@ buildRelatedPopularForNamespace
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    , HasCallStack
     ) => IO [Txt]
-buildRelatedPopularForNamespace = timed do
+buildRelatedPopularForNamespace = do
   Milliseconds (fromIntegral -> now) _ <- time
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForNamespace @a >>= sessions
@@ -1032,9 +1025,8 @@ buildRelatedTopForNamespace
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    , HasCallStack
     ) => IO [Txt]
-buildRelatedTopForNamespace = timed do
+buildRelatedTopForNamespace = do
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForNamespace @a >>= sessions
   counts <- Map.toList <$> foldM (withSession c) Map.empty ss
@@ -1067,9 +1059,8 @@ buildRelatedPopularForContext
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    , HasCallStack
     ) => Context a -> IO [Txt]
-buildRelatedPopularForContext ctx = timed do
+buildRelatedPopularForContext ctx = do
   Milliseconds (fromIntegral -> now) _ <- time
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForContext ctx >>= sessions
@@ -1110,9 +1101,8 @@ buildRelatedTopForContext
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    , HasCallStack
     ) => Context a -> IO [Txt]
-buildRelatedTopForContext ctx = timed do
+buildRelatedTopForContext ctx = do
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForContext ctx >>= sessions
   counts <- Map.toList <$> foldM (withSession c) Map.empty ss
@@ -1145,9 +1135,8 @@ buildRelatedPopularForResource
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    , HasCallStack
     ) => Context a -> Name a -> IO [Txt]
-buildRelatedPopularForResource ctx nm = timed do
+buildRelatedPopularForResource ctx nm = do
   Milliseconds (fromIntegral -> now) _ <- time
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForResource ctx nm >>= sessions
@@ -1188,9 +1177,8 @@ buildRelatedTopForResource
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    , HasCallStack
     ) => Context a -> Name a -> IO [Txt]
-buildRelatedTopForResource ctx nm = timed do
+buildRelatedTopForResource ctx nm = do
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForResource ctx nm >>= sessions
   counts <- Map.toList <$> foldM (withSession c) Map.empty ss
