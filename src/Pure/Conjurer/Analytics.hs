@@ -9,7 +9,7 @@ import Pure.Data.Txt
 import Pure.Data.Time
 import Pure.Data.Marker
 import Pure.Router (route)
-import Pure.Elm.Component (Default(..))
+import Pure.Elm.Component (Default(..),timed,HasCallStack)
 import Pure.Sorcerer hiding (events)
 import qualified Pure.Sorcerer as Sorcerer
 import Pure.WebSocket as WS hiding (Nat,rep)
@@ -31,7 +31,7 @@ import Unsafe.Coerce
 import System.IO.Unsafe
 
 import Data.ByteString.Lazy (ByteString)
-import Data.Map.Strict as Map
+import Data.Map.Strict as Map hiding (mapMaybe)
 import Data.Set as Set
 
 #ifndef __GHCJS__
@@ -91,7 +91,6 @@ data Session = Session
   , end       :: Time
   , ip        :: IP
   , user      :: Maybe Username
-  , events    :: [(Time,Txt)]
   } deriving stock Generic
     deriving anyclass (ToJSON,FromJSON)
 
@@ -119,7 +118,6 @@ instance Aggregable SessionMsg Session where
       { start = t 
       , end = t 
       , user = Nothing 
-      , events = []
       , ..
       }
 
@@ -127,12 +125,6 @@ instance Aggregable SessionMsg Session where
     Sorcerer.Update ses 
       { end = t
       , user = Just un 
-      }
-
-  update (SessionEvent t ev) (Just ses) = 
-    Sorcerer.Update ses 
-      { end = t
-      , events = (t,ev) : events ses 
       }
 
   update (SessionEnd t) (Just ses) = 
@@ -429,11 +421,12 @@ listUnique
      ) => IO [(Context a,Name a)]
 listUnique = do
   uniqueSessionIds <- listSessionsForNamespace @a
-  streamNub . catMaybes . Prelude.concatMap resources <$> sessions uniqueSessionIds
+  streamNub . mapMaybe parse . Prelude.concat <$> traverse getEvents uniqueSessionIds
   where
-    resources Session {..} = fmap parse events
+    getEvents = Sorcerer.events . SessionStream
 
-    parse (_,evt) = unsafePerformIO (route (readRoute (,)) evt)
+    parse (SessionEvent _ evt) = unsafePerformIO (route (readRoute (,)) evt)
+    parse _ = Nothing
 
 listUniqueContexts
   :: forall a.
@@ -443,14 +436,16 @@ listUniqueContexts
     ) => IO [Context a]
 listUniqueContexts = do
   uniqueSessionIds <- listSessionsForNamespace @a
-  streamNub . catMaybes . Prelude.concatMap contexts <$> sessions uniqueSessionIds
+  streamNub . mapMaybe parse . Prelude.concat <$> traverse getEvents uniqueSessionIds
   where
-    contexts Session {..} = fmap parse events
+    getEvents = Sorcerer.events . SessionStream
 
-    parse (_,evt) =
+    parse (SessionEvent _ evt) =
       case unsafePerformIO (route (readRoute (,)) evt) of
         Just (ctx,_) -> Just ctx
         _ -> Nothing
+    parse _ =
+      Nothing
 
 analyticsCountForContext 
   :: forall a. 
@@ -493,14 +488,16 @@ listUniqueResources
     ) => Context a -> IO [Name a]
 listUniqueResources ctx = do
   uniqueSessionIds <- listSessionsForNamespace @a
-  streamNub . catMaybes . Prelude.concatMap resources <$> sessions uniqueSessionIds
+  streamNub . mapMaybe parse . Prelude.concat <$> traverse getEvents uniqueSessionIds
   where
-    resources Session {..} = fmap parse events
+    getEvents = Sorcerer.events . SessionStream
 
-    parse (_,evt) =
+    parse (SessionEvent _ evt) =
       case unsafePerformIO (route (readRoute (,)) evt) of
         Just (ctx',nm) | ctx == ctx' -> Just nm
         _ -> Nothing
+    parse _ = 
+      Nothing
 
 analyticsCountForResource
   :: forall a. 
@@ -750,8 +747,9 @@ buildPopularForNamespace
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a), ToJSON (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a), ToJSON (Name a)
+    , HasCallStack
     ) => IO [(Context a,Name a)]
-buildPopularForNamespace = do
+buildPopularForNamespace = timed do
   Milliseconds (fromIntegral -> now) _ <- time
   c <- fromIntegral <$> analyticsCountForNamespace @a
   ctxnms <- listUnique @a
@@ -773,10 +771,11 @@ buildPopularForNamespace = do
       ss <- listSessionsForResource ctx nm >>= sessions
       foldM (withSession n) acc ss
       where
-        withSession n acc Session {..} = 
-          foldM withEvent acc events
+        withSession n acc Session {..} = do
+          evs <- Sorcerer.events (SessionStream sessionid)
+          foldM withEvent acc evs
           where
-            withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = do
+            withEvent acc (SessionEvent (Milliseconds (fromIntegral -> t) _) evt) = do
               mctxnm <- route (readRoute (,)) evt
               case mctxnm of
                 Just (ctx',nm') | ctx == ctx', nm == nm' ->
@@ -794,6 +793,7 @@ buildPopularForNamespace = do
                         pure acc
                 _ -> 
                   pure acc
+            withEvent acc _ = pure acc
 
 buildTopForNamespace 
   :: forall a. 
@@ -801,8 +801,9 @@ buildTopForNamespace
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , HasCallStack
     ) => IO [(Context a,Name a)]
-buildTopForNamespace = do
+buildTopForNamespace = timed do
   c <- fromIntegral <$> analyticsCountForNamespace @a
   ctxnms <- listUnique @a
   counts <- Map.toList <$> foldM withContextAndName Map.empty ctxnms
@@ -819,10 +820,11 @@ buildTopForNamespace = do
       ss <- listSessionsForResource ctx nm >>= sessions
       foldM (withSession n) acc ss
       where
-        withSession n acc Session {..} =
-          foldM withEvent acc events
+        withSession n acc Session {..} = do
+          evs <- Sorcerer.events (SessionStream sessionid)
+          foldM withEvent acc evs
           where
-            withEvent acc (_,evt) = do
+            withEvent acc (SessionEvent _ evt) = do
               mctxnm <- route (readRoute (,)) evt
               case mctxnm of
                 Just (ctx',nm') | ctx == ctx', nm == nm' ->
@@ -839,6 +841,7 @@ buildTopForNamespace = do
                         pure acc
                 _ ->
                   pure acc
+            withEvent acc _ = pure acc
 
 buildRecentForNamespace 
   :: forall a. 
@@ -846,8 +849,9 @@ buildRecentForNamespace
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , HasCallStack
     ) => IO [(Context a,Name a)]
-buildRecentForNamespace = do
+buildRecentForNamespace = timed do
   ctxs <- listUniqueContexts @a
   ages <- Map.toList <$> foldM withContext Map.empty ctxs
   let
@@ -869,8 +873,9 @@ buildPopularForContext
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , HasCallStack
     ) => Context a -> IO [(Context a,Name a)]
-buildPopularForContext ctx = do
+buildPopularForContext ctx = timed do
   Milliseconds (fromIntegral -> now) _ <- time
   c <- fromIntegral <$> analyticsCountForNamespace @a
   nms <- listUniqueResources ctx
@@ -892,10 +897,11 @@ buildPopularForContext ctx = do
       ss <- listSessionsForResource ctx nm >>= sessions
       foldM (withSession n) acc ss
       where
-        withSession n acc Session {..} =
-          foldM withEvent acc events
+        withSession n acc Session {..} = do
+          evs <- Sorcerer.events (SessionStream sessionid)
+          foldM withEvent acc evs
           where
-            withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = do
+            withEvent acc (SessionEvent (Milliseconds (fromIntegral -> t) _) evt) = do
               mctxnm <- route (readRoute (,)) evt
               case mctxnm of
                 Just (ctx',nm') | ctx == ctx', nm == nm' ->
@@ -913,6 +919,7 @@ buildPopularForContext ctx = do
                         pure acc
                 _ ->
                   pure acc
+            withEvent acc _ = pure acc
 
 buildTopForContext 
   :: forall a. 
@@ -920,8 +927,9 @@ buildTopForContext
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , HasCallStack
     ) => Context a -> IO [(Context a,Name a)]
-buildTopForContext ctx = do
+buildTopForContext ctx = timed do
   c <- fromIntegral <$> analyticsCountForNamespace @a
   nms <- listUniqueResources ctx
   counts <- Map.toList <$> foldM withResource Map.empty nms
@@ -936,10 +944,11 @@ buildTopForContext ctx = do
       ss <- listSessionsForResource ctx nm >>= sessions
       foldM (withSession n) acc ss
       where
-        withSession n acc Session {..} = 
-          foldM withEvent acc events
+        withSession n acc Session {..} = do
+          evs <- Sorcerer.events (SessionStream sessionid)
+          foldM withEvent acc evs
           where
-            withEvent acc (_,evt) = do
+            withEvent acc (SessionEvent _ evt) = do
               mctxnm <- route (readRoute (,)) evt
               case mctxnm of
                 Just (ctx',nm') | ctx == ctx', nm == nm' ->
@@ -956,6 +965,7 @@ buildTopForContext ctx = do
                         pure acc
                 _ ->
                   pure acc
+            withEvent acc _ = pure acc
 
 buildRecentForContext
   :: forall a. 
@@ -963,8 +973,9 @@ buildRecentForContext
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , HasCallStack
     ) => Context a -> IO [(Context a,Name a)]
-buildRecentForContext ctx = do
+buildRecentForContext ctx = timed do
   nms <- listUniqueResources ctx
   ages <- Map.toList <$> foldM withResource Map.empty nms
   let
@@ -983,8 +994,9 @@ buildRelatedPopularForNamespace
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , HasCallStack
     ) => IO [Txt]
-buildRelatedPopularForNamespace = do
+buildRelatedPopularForNamespace = timed do
   Milliseconds (fromIntegral -> now) _ <- time
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForNamespace @a >>= sessions
@@ -1001,10 +1013,11 @@ buildRelatedPopularForNamespace = do
       let !v = oldv * 2 ** ((oldt - newt) / d) + newv
       in (newt,v)
 
-    withSession c acc Session {..} =
-      foldM withEvent acc events
+    withSession c acc Session {..} = do
+      evs <- Sorcerer.events (SessionStream sessionid)
+      foldM withEvent acc evs
       where
-        withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = 
+        withEvent acc (SessionEvent (Milliseconds (fromIntegral -> t) _) evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1017,6 +1030,7 @@ buildRelatedPopularForNamespace = do
                 in pure $! Map.insert evt (b,newt,newv) acc
               else
                 pure acc
+        withEvent acc _ = pure acc
 
 -- Consider weighting distance from target in session.
 buildRelatedTopForNamespace 
@@ -1025,8 +1039,9 @@ buildRelatedTopForNamespace
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , HasCallStack
     ) => IO [Txt]
-buildRelatedTopForNamespace = do
+buildRelatedTopForNamespace = timed do
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForNamespace @a >>= sessions
   counts <- Map.toList <$> foldM (withSession c) Map.empty ss
@@ -1036,10 +1051,11 @@ buildRelatedTopForNamespace = do
     result = fmap fst sorted
   pure result
   where
-    withSession c acc Session {..} =
-      foldM withEvent acc events
+    withSession c acc Session {..} = do
+      evs <- Sorcerer.events (SessionStream sessionid)
+      foldM withEvent acc evs
       where
-        withEvent acc (_,evt) = 
+        withEvent acc (SessionEvent _ evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1051,6 +1067,7 @@ buildRelatedTopForNamespace = do
                 pure $! Map.insert evt (b,oldv + 1) acc
               else
                 pure acc
+        withEvent acc _ = pure acc
 
 -- Consider weighting distance from target in session.
 buildRelatedPopularForContext 
@@ -1059,8 +1076,9 @@ buildRelatedPopularForContext
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , HasCallStack
     ) => Context a -> IO [Txt]
-buildRelatedPopularForContext ctx = do
+buildRelatedPopularForContext ctx = timed do
   Milliseconds (fromIntegral -> now) _ <- time
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForContext ctx >>= sessions
@@ -1077,10 +1095,11 @@ buildRelatedPopularForContext ctx = do
       let !v = oldv * 2 ** ((oldt - newt) / d) + newv
       in (newt,v)
 
-    withSession c acc Session {..} =
-      foldM withEvent acc events
+    withSession c acc Session {..} = do
+      evs <- Sorcerer.events (SessionStream sessionid)
+      foldM withEvent acc evs
       where
-        withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = 
+        withEvent acc (SessionEvent (Milliseconds (fromIntegral -> t) _) evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1093,6 +1112,7 @@ buildRelatedPopularForContext ctx = do
                 in pure $! Map.insert evt (b,newt,newv) acc
               else
                 pure acc
+        withEvent acc _ = pure acc
 
 -- Consider weighting distance from target in session.
 buildRelatedTopForContext 
@@ -1101,8 +1121,9 @@ buildRelatedTopForContext
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , HasCallStack
     ) => Context a -> IO [Txt]
-buildRelatedTopForContext ctx = do
+buildRelatedTopForContext ctx = timed do
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForContext ctx >>= sessions
   counts <- Map.toList <$> foldM (withSession c) Map.empty ss
@@ -1112,10 +1133,11 @@ buildRelatedTopForContext ctx = do
     result = fmap fst sorted
   pure result
   where
-    withSession c acc Session {..} =
-      foldM withEvent acc events
+    withSession c acc Session {..} = do
+      evs <- Sorcerer.events (SessionStream sessionid)
+      foldM withEvent acc evs
       where
-        withEvent acc (_,evt) = 
+        withEvent acc (SessionEvent _ evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1127,6 +1149,7 @@ buildRelatedTopForContext ctx = do
                 pure $! Map.insert evt (b,oldv + 1) acc
               else
                 pure acc
+        withEvent acc _ = pure acc
 
 -- Consider weighting distance from target in session.
 buildRelatedPopularForResource 
@@ -1135,8 +1158,9 @@ buildRelatedPopularForResource
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , HasCallStack
     ) => Context a -> Name a -> IO [Txt]
-buildRelatedPopularForResource ctx nm = do
+buildRelatedPopularForResource ctx nm = timed do
   Milliseconds (fromIntegral -> now) _ <- time
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForResource ctx nm >>= sessions
@@ -1153,10 +1177,11 @@ buildRelatedPopularForResource ctx nm = do
       let !v = oldv * 2 ** ((oldt - newt) / d) + newv
       in (newt,v)
 
-    withSession c acc Session {..} =
-      foldM withEvent acc events
+    withSession c acc Session {..} = do
+      evs <- Sorcerer.events (SessionStream sessionid)
+      foldM withEvent acc evs
       where
-        withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = 
+        withEvent acc (SessionEvent (Milliseconds (fromIntegral -> t) _) evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1169,6 +1194,7 @@ buildRelatedPopularForResource ctx nm = do
                 in pure $! Map.insert evt (b,newt,newv) acc
               else
                 pure acc
+        withEvent acc _ = pure acc
 
 -- Consider weighting distance from target in session.
 buildRelatedTopForResource 
@@ -1177,8 +1203,9 @@ buildRelatedTopForResource
     , Routable a
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    , HasCallStack
     ) => Context a -> Name a -> IO [Txt]
-buildRelatedTopForResource ctx nm = do
+buildRelatedTopForResource ctx nm = timed do
   c <- analyticsCountForNamespace @a
   ss <- listSessionsForResource ctx nm >>= sessions
   counts <- Map.toList <$> foldM (withSession c) Map.empty ss
@@ -1188,10 +1215,11 @@ buildRelatedTopForResource ctx nm = do
     result = fmap fst sorted
   pure result
   where
-    withSession c acc Session {..} =
-      foldM withEvent acc events
+    withSession c acc Session {..} = do
+      evs <- Sorcerer.events (SessionStream sessionid)
+      foldM withEvent acc evs
       where
-        withEvent acc (_,evt) = 
+        withEvent acc (SessionEvent _ evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1203,6 +1231,7 @@ buildRelatedTopForResource ctx nm = do
                 pure $! Map.insert evt (b,oldv + 1) acc
               else
                 pure acc
+        withEvent acc _ = pure acc
 
 --------------------------------------------------------------------------------
 
