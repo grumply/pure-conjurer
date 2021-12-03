@@ -169,12 +169,78 @@ instance Aggregable SessionsMsg Sessions where
 
 --------------------------------------------------------------------------------
 
-data Analytics = Analytics {-# UNPACK #-}!Time {-# UNPACK #-}!Int
+data GlobalAnalytics = GlobalAnalytics {-# UNPACK #-}!Time {-# UNPACK #-}!Int
   deriving stock Generic
   deriving anyclass (ToJSON,FromJSON)
 
-data AnalyticsMsg a
-  = AnalyticsEvent Time SessionId
+data GlobalAnalyticsMsg a
+  = GlobalAnalyticsEvent Time SessionId
+  deriving stock Generic
+  deriving anyclass (ToJSON,FromJSON)
+
+instance ( Typeable a) => Streamable (GlobalAnalyticsMsg a) where
+  data Stream (GlobalAnalyticsMsg a) = GlobalAnalyticsStream
+    deriving stock (Generic,Eq,Ord)
+    deriving anyclass Hashable
+
+  stream GlobalAnalyticsStream = 
+    "conjurer/analytics/global/" 
+      ++ fromTxt (rep @a)
+      ++ ".stream"
+
+instance ( Typeable a) => Aggregable (GlobalAnalyticsMsg a) GlobalAnalytics where
+  update (GlobalAnalyticsEvent t _) Nothing = Sorcerer.Update (GlobalAnalytics t 1)
+  update _ (Just (GlobalAnalytics t n)) = Sorcerer.Update (GlobalAnalytics t (n + 1))
+
+  aggregate = "analytics.aggregate"
+
+--------------------------------------------------------------------------------
+
+data ContextAnalytics = ContextAnalytics {-# UNPACK #-}!Time {-# UNPACK #-}!Int
+  deriving stock Generic
+  deriving anyclass (ToJSON,FromJSON)
+
+data ContextAnalyticsMsg a
+  = ContextAnalyticsEvent Time SessionId
+  deriving stock Generic
+  deriving anyclass (ToJSON,FromJSON)
+
+instance 
+  ( Typeable a
+  , Hashable (Context a), Pathable (Context a)
+  ) => Streamable (ContextAnalyticsMsg a) 
+  where
+    data Stream (ContextAnalyticsMsg a) = ContextAnalyticsStream (Context a)
+      deriving stock Generic
+
+    stream (ContextAnalyticsStream ctx) = 
+      "conjurer/analytics/contexts/" 
+        ++ fromTxt (rep @a)
+        ++ fromTxt (toPath ctx)
+        ++ ".stream"
+
+deriving instance (Eq (Context a)) => Eq (Stream (ContextAnalyticsMsg a))
+deriving instance (Ord (Context a)) => Ord (Stream (ContextAnalyticsMsg a))
+deriving instance (Hashable (Context a)) => Hashable (Stream (ContextAnalyticsMsg a))
+
+instance 
+  ( Typeable a
+  , Hashable (Context a), Pathable (Context a)
+  ) => Aggregable (ContextAnalyticsMsg a) ContextAnalytics 
+  where
+    update (ContextAnalyticsEvent t _) Nothing = Sorcerer.Update (ContextAnalytics t 1)
+    update _ (Just (ContextAnalytics t n)) = Sorcerer.Update (ContextAnalytics t (n + 1))
+
+    aggregate = "analytics.aggregate"
+
+--------------------------------------------------------------------------------
+
+data ResourceAnalytics = ResourceAnalytics {-# UNPACK #-}!Time {-# UNPACK #-}!Int
+  deriving stock Generic
+  deriving anyclass (ToJSON,FromJSON)
+
+data ResourceAnalyticsMsg a
+  = ResourceAnalyticsEvent Time SessionId
   deriving stock Generic
   deriving anyclass (ToJSON,FromJSON)
 
@@ -182,42 +248,30 @@ instance
   ( Typeable a
   , Hashable (Context a), Pathable (Context a)
   , Hashable (Name a), Pathable (Name a)
-  ) => Streamable (AnalyticsMsg a) 
+  ) => Streamable (ResourceAnalyticsMsg a) 
   where
-    data Stream (AnalyticsMsg a)
-      = GlobalAnalyticsStream
-      | ContextAnalyticsStream (Context a) 
-      | ResourceAnalyticsStream (Context a) (Name a)
+    data Stream (ResourceAnalyticsMsg a) = ResourceAnalyticsStream (Context a) (Name a)
       deriving stock Generic
 
-    stream GlobalAnalyticsStream = 
-      "conjurer/analytics/" 
-        ++ fromTxt (rep @a)
-        ++ ".stream"
-    stream (ContextAnalyticsStream ctx) = 
-      "conjurer/analytics/" 
-        ++ fromTxt (rep @a)
-        ++ fromTxt (toPath ctx)
-        ++ ".stream"
     stream (ResourceAnalyticsStream ctx nm) = 
-      "conjurer/analytics/" 
+      "conjurer/analytics/resources/" 
         ++ fromTxt (rep @a)
         ++ fromTxt (toPath ctx)
         ++ fromTxt (toPath nm)
         ++ ".stream"
 
-deriving instance (Eq (Context a) , Eq (Name a)) => Eq (Stream (AnalyticsMsg a))
-deriving instance (Ord (Context a), Ord (Name a)) => Ord (Stream (AnalyticsMsg a))
-deriving instance (Hashable (Context a), Hashable (Name a)) => Hashable (Stream (AnalyticsMsg a))
+deriving instance (Eq (Context a) , Eq (Name a)) => Eq (Stream (ResourceAnalyticsMsg a))
+deriving instance (Ord (Context a), Ord (Name a)) => Ord (Stream (ResourceAnalyticsMsg a))
+deriving instance (Hashable (Context a), Hashable (Name a)) => Hashable (Stream (ResourceAnalyticsMsg a))
 
 instance 
   ( Typeable a
   , Hashable (Context a), Pathable (Context a)
   , Hashable (Name a), Pathable (Name a)
-  ) => Aggregable (AnalyticsMsg a) Analytics 
+  ) => Aggregable (ResourceAnalyticsMsg a) ResourceAnalytics 
   where
-    update (AnalyticsEvent t _) Nothing = Sorcerer.Update (Analytics t 1)
-    update _ (Just (Analytics t n)) = Sorcerer.Update (Analytics t (n + 1))
+    update (ResourceAnalyticsEvent t _) Nothing = Sorcerer.Update (ResourceAnalytics t 1)
+    update _ (Just (ResourceAnalytics t n)) = Sorcerer.Update (ResourceAnalytics t (n + 1))
 
     aggregate = "analytics.aggregate"
 
@@ -253,20 +307,20 @@ recordRead
     , ToJSON (Name a), FromJSON (Name a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
     ) => SessionId -> Context a -> Name a -> IO ()
-recordRead sid ctx nm = replicateM_ 10000 do
+recordRead sid ctx nm = do
   now <- time
 
   Sorcerer.write (SessionStream sid) do
     SessionEvent now (toReadRoute ctx nm)
 
   Sorcerer.write (GlobalAnalyticsStream @a) do
-    AnalyticsEvent now sid
+    GlobalAnalyticsEvent now sid
 
   Sorcerer.write (ContextAnalyticsStream ctx) do
-    AnalyticsEvent now sid
+    ContextAnalyticsEvent now sid
 
   Sorcerer.write (ResourceAnalyticsStream ctx nm) do
-    AnalyticsEvent now sid
+    ResourceAnalyticsEvent now sid
 
 recordEvent :: SessionId -> Txt -> IO ()
 recordEvent sid evt = do
@@ -301,6 +355,23 @@ addAnalytics sid cbs = cbs { onRead = analyzeRead }
 
 --------------------------------------------------------------------------------
 
+{-# INLINE streamNubOn #-}
+streamNubOn :: Ord x => (a -> x) -> [a] -> [a]
+streamNubOn f = go Set.empty
+  where
+    go acc [] = []
+    go acc (a : as) = let x = f a in
+      if Set.member x acc then
+        go acc as
+      else
+        a : go (Set.insert x acc) as
+
+{-# INLINE streamNub #-}
+streamNub :: Ord a => [a] -> [a]
+streamNub = streamNubOn id
+
+--------------------------------------------------------------------------------
+
 sessionsCount :: IO Int
 sessionsCount = 
   Sorcerer.read SessionsStream >>= \case
@@ -314,7 +385,7 @@ oldestSession =
     _ -> time
 
 listSessions :: IO [SessionId]
-listSessions = fmap getSessionId <$> Sorcerer.events SessionsStream
+listSessions = streamNub . fmap getSessionId <$> Sorcerer.events SessionsStream
   where getSessionId (SessionCreated _ sid) = sid
 
 analyticsCountForNamespace 
@@ -325,7 +396,7 @@ analyticsCountForNamespace
     ) => IO Int
 analyticsCountForNamespace =
   Sorcerer.read (GlobalAnalyticsStream @a) >>= \case
-    Just (Analytics _ n) -> pure n
+    Just (GlobalAnalytics _ n) -> pure n
     _ -> pure 0
 
 oldestSessionForNamespace 
@@ -336,7 +407,7 @@ oldestSessionForNamespace
     ) => IO Time
 oldestSessionForNamespace =
   Sorcerer.read (GlobalAnalyticsStream @a) >>= \case
-    Just (Analytics t _) -> pure t
+    Just (GlobalAnalytics t _) -> pure t
     _ -> time
 
 listSessionsForNamespace 
@@ -346,10 +417,23 @@ listSessionsForNamespace
     , Hashable (Name a), Pathable (Name a)
     ) => IO [SessionId]
 listSessionsForNamespace = 
-  fmap getSessionId <$> do
-    Sorcerer.events (GlobalAnalyticsStream @a)
+  streamNub . fmap getSessionId <$> Sorcerer.events (GlobalAnalyticsStream @a)
   where 
-    getSessionId (AnalyticsEvent _ sid) = sid
+    getSessionId (GlobalAnalyticsEvent _ sid) = sid
+
+listUnique
+  :: forall a.
+     ( Typeable a
+     , Hashable (Context a), Pathable (Context a), Ord (Context a)
+     , Hashable (Name a), Pathable (Name a), Ord (Name a)
+     ) => IO [(Context a,Name a)]
+listUnique = do
+  uniqueSessionIds <- listSessionsForNamespace @a
+  streamNub . catMaybes . Prelude.concatMap resources <$> sessions uniqueSessionIds
+  where
+    resources Session {..} = fmap parse events
+
+    parse (_,evt) = unsafePerformIO (route (readRoute (,)) evt)
 
 listUniqueContexts
   :: forall a.
@@ -358,15 +442,15 @@ listUniqueContexts
     , Hashable (Name a), Pathable (Name a)
     ) => IO [Context a]
 listUniqueContexts = do
-  ss <- listSessionsForNamespace @a >>= sessions
-  pure $ Set.toList $ List.foldr add Set.empty ss  
+  uniqueSessionIds <- listSessionsForNamespace @a
+  streamNub . catMaybes . Prelude.concatMap contexts <$> sessions uniqueSessionIds
   where
-    add Session {..} !set = List.foldr parse set events
+    contexts Session {..} = fmap parse events
 
-    parse (_,!evt) !set =
+    parse (_,evt) =
       case unsafePerformIO (route (readRoute (,)) evt) of
-        Just (ctx,_) -> Set.insert ctx set
-        _ -> set
+        Just (ctx,_) -> Just ctx
+        _ -> Nothing
 
 analyticsCountForContext 
   :: forall a. 
@@ -376,7 +460,7 @@ analyticsCountForContext
     ) => Context a -> IO Int
 analyticsCountForContext ctx =
   Sorcerer.read (ContextAnalyticsStream ctx) >>= \case
-    Just (Analytics _ n) -> pure n
+    Just (ContextAnalytics _ n) -> pure n
     _ -> pure 0
 
 oldestSessionForContext
@@ -387,7 +471,7 @@ oldestSessionForContext
     ) => Context a -> IO Time
 oldestSessionForContext ctx =
   Sorcerer.read (ContextAnalyticsStream ctx) >>= \case
-    Just (Analytics t _) -> pure t
+    Just (ContextAnalytics t _) -> pure t
     _ -> time
 
 listSessionsForContext 
@@ -397,10 +481,9 @@ listSessionsForContext
     , Hashable (Name a), Pathable (Name a)
     ) => Context a -> IO [SessionId]
 listSessionsForContext ctx = 
-  fmap getSessionId <$> do
-    Sorcerer.events (ContextAnalyticsStream ctx)
+  streamNub . fmap getSessionId <$> Sorcerer.events (ContextAnalyticsStream ctx)
   where 
-    getSessionId (AnalyticsEvent _ sid) = sid
+    getSessionId (ContextAnalyticsEvent _ sid) = sid
 
 listUniqueResources
   :: forall a.
@@ -409,16 +492,15 @@ listUniqueResources
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
     ) => Context a -> IO [Name a]
 listUniqueResources ctx = do
-  ss <- listSessionsForNamespace @a >>= sessions
-  pure $ Set.toList $ List.foldr add Set.empty ss  
+  uniqueSessionIds <- listSessionsForNamespace @a
+  streamNub . catMaybes . Prelude.concatMap resources <$> sessions uniqueSessionIds
   where
-    add Session {..} !set = List.foldr parse set events
+    resources Session {..} = fmap parse events
 
-    parse (_,evt) !set
-      | Just ((== ctx) -> True,nm) <- unsafePerformIO (route (readRoute (,)) evt) = 
-        Set.insert nm set
-      | otherwise =
-        set
+    parse (_,evt) =
+      case unsafePerformIO (route (readRoute (,)) evt) of
+        Just (ctx',nm) | ctx == ctx' -> Just nm
+        _ -> Nothing
 
 analyticsCountForResource
   :: forall a. 
@@ -428,7 +510,7 @@ analyticsCountForResource
     ) => Context a -> Name a -> IO Int
 analyticsCountForResource ctx nm =
   Sorcerer.read (ResourceAnalyticsStream ctx nm) >>= \case
-    Just (Analytics _ n) -> pure n
+    Just (ResourceAnalytics _ n) -> pure n
     _ -> pure 0
 
 oldestSessionForResource
@@ -439,7 +521,7 @@ oldestSessionForResource
     ) => Context a -> Name a -> IO Time
 oldestSessionForResource ctx nm =
   Sorcerer.read (ResourceAnalyticsStream ctx nm) >>= \case
-    Just (Analytics t _) -> pure t
+    Just (ResourceAnalytics t _) -> pure t
     _ -> time
 
 listSessionsForResource 
@@ -449,20 +531,15 @@ listSessionsForResource
     , Hashable (Name a), Pathable (Name a)
     ) => Context a -> Name a -> IO [SessionId]
 listSessionsForResource ctx nm = 
-  fmap getSessionId <$> do
-    Sorcerer.events (ResourceAnalyticsStream ctx nm)
+  streamNub . fmap getSessionId <$> Sorcerer.events (ResourceAnalyticsStream ctx nm)
   where 
-    getSessionId (AnalyticsEvent _ sid) = sid
+    getSessionId (ResourceAnalyticsEvent _ sid) = sid
 
 session :: SessionId -> IO (Maybe Session)
 session = Sorcerer.read . SessionStream
 
 sessions :: [SessionId] -> IO [Session]
-sessions = fmap catMaybes . traverse session'
-  where
-    session' sid@(SessionId m) = do
-      print (toTxt m)
-      session sid
+sessions = fmap catMaybes . traverse session
 
 namespaceSessions
   :: forall a. 
@@ -664,6 +741,8 @@ rank positive total
       (x - y) / (1 + z2 / total)
 
 --------------------------------------------------------------------------------
+-- TODO: Rewrite. This naive approach will not scale well.
+-- An online algorithm would be much better, even if it is persisted.
 
 buildPopularForNamespace 
   :: forall a. 
@@ -676,8 +755,8 @@ buildPopularForNamespace
 buildPopularForNamespace = timed do
   Milliseconds (fromIntegral -> now) _ <- time
   c <- fromIntegral <$> analyticsCountForNamespace @a
-  ctxs <- listUniqueContexts @a
-  counts <- Map.toList <$> foldM withContext Map.empty ctxs
+  ctxnms <- listUnique @a
+  counts <- Map.toList <$> foldM withContextAndName Map.empty ctxnms
   let 
     ranked = fmap (fmap (\(b,t,v) -> let (!newt,!newv) = upd (t,v) (now,1) in rank newv c)) counts
     sorted = List.sortBy (flip compare `on` snd) ranked
@@ -690,40 +769,32 @@ buildPopularForNamespace = timed do
       let v = oldv * 2 ** ((oldt - newt) / d) + newv
       in (newt,v)
 
-    withContext acc ctx = do
-      print ("withContext",encodeBS ctx)
-      nms <- listUniqueResources ctx
-      foldM withResource acc nms
+    withContextAndName acc (ctx,nm) = do
+      n <- analyticsCountForResource ctx nm
+      ss <- listSessionsForResource ctx nm >>= sessions
+      foldM (withSession n) acc ss
       where
-        withResource acc nm = do
-          print ("withResource",encodeBS nm)
-          n <- analyticsCountForResource ctx nm
-          ss <- listSessionsForResource ctx nm >>= sessions
-          foldM (withSession n) acc ss
+        withSession n acc Session {..} = 
+          foldM withEvent acc events
           where
-            withSession n acc Session {..} = do
-              print ("withSession",encodeBS sessionid)
-              foldM withEvent acc events
-              where
-                withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = do
-                  print ("withEvent",evt)
-                  mctxnm <- route (readRoute (,)) evt
-                  case mctxnm of
-                    Just (ctx',nm') | ctx == ctx', nm == nm' ->
-                      case Map.lookup (ctx,nm) acc of
-                        Nothing -> do
-                          b <- new 0.01 n
-                          Bloom.add b ip
-                          pure $ Map.insert (ctx,nm) (b,t,1) acc
-                        Just (b,oldt,oldv) -> do
-                          updated <- Bloom.update b ip
-                          if updated then 
-                            let (!newt,!newv) = upd (oldt,oldv) (t,1)
-                            in pure $ Map.insert (ctx,nm) (b,newt,newv) acc
-                          else
-                            pure acc
-                    _ -> 
-                      pure acc
+            withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = do
+              mctxnm <- route (readRoute (,)) evt
+              case mctxnm of
+                Just (ctx',nm') | ctx == ctx', nm == nm' ->
+                  case Map.lookup (ctx,nm) acc of
+                    Nothing -> do
+                      b <- new 0.01 n
+                      Bloom.add b ip
+                      pure $ Map.insert (ctx,nm) (b,t,1) acc
+                    Just (b,oldt,oldv) -> do
+                      updated <- Bloom.update b ip
+                      if updated then 
+                        let (!newt,!newv) = upd (oldt,oldv) (t,1)
+                        in pure $ Map.insert (ctx,nm) (b,newt,newv) acc
+                      else
+                        pure acc
+                _ -> 
+                  pure acc
 
 buildTopForNamespace 
   :: forall a. 
@@ -735,8 +806,8 @@ buildTopForNamespace
     ) => IO [(Context a,Name a)]
 buildTopForNamespace = timed do
   c <- fromIntegral <$> analyticsCountForNamespace @a
-  ctxs <- listUniqueContexts @a
-  counts <- Map.toList <$> foldM withContext Map.empty ctxs
+  ctxnms <- listUnique @a
+  counts <- Map.toList <$> foldM withContextAndName Map.empty ctxnms
   let 
     ranked = fmap (fmap (\(b,v) -> rank v c)) counts
     sorted = List.sortBy (flip compare `on` snd) ranked
@@ -745,35 +816,31 @@ buildTopForNamespace = timed do
   where
     Milliseconds (fromIntegral -> d) _ = Day 
 
-    withContext acc ctx = do
-      nms <- listUniqueResources ctx
-      foldM withResource acc nms
+    withContextAndName acc (ctx,nm) = do
+      n <- analyticsCountForResource ctx nm
+      ss <- listSessionsForResource ctx nm >>= sessions
+      foldM (withSession n) acc ss
       where
-        withResource acc nm = do
-          n <- analyticsCountForResource ctx nm
-          ss <- listSessionsForResource ctx nm >>= sessions
-          foldM (withSession n) acc ss
+        withSession n acc Session {..} =
+          foldM withEvent acc events
           where
-            withSession n acc Session {..} =
-              foldM withEvent acc events
-              where
-                withEvent acc (_,evt) = do
-                  mctxnm <- route (readRoute (,)) evt
-                  case mctxnm of
-                    Just (ctx',nm') | ctx == ctx', nm == nm' ->
-                      case Map.lookup (ctx,nm) acc of
-                        Nothing -> do
-                          b <- new 0.01 n
-                          Bloom.add b ip
-                          pure $! Map.insert (ctx,nm) (b,1) acc
-                        Just (b,v) -> do
-                          updated <- Bloom.update b ip
-                          if updated then 
-                            pure $! Map.insert (ctx,nm) (b,v + 1) acc
-                          else
-                            pure acc
-                    _ ->
-                      pure acc
+            withEvent acc (_,evt) = do
+              mctxnm <- route (readRoute (,)) evt
+              case mctxnm of
+                Just (ctx',nm') | ctx == ctx', nm == nm' ->
+                  case Map.lookup (ctx,nm) acc of
+                    Nothing -> do
+                      b <- new 0.01 n
+                      Bloom.add b ip
+                      pure $! Map.insert (ctx,nm) (b,1) acc
+                    Just (b,v) -> do
+                      updated <- Bloom.update b ip
+                      if updated then 
+                        pure $! Map.insert (ctx,nm) (b,v + 1) acc
+                      else
+                        pure acc
+                _ ->
+                  pure acc
 
 buildRecentForNamespace 
   :: forall a. 
