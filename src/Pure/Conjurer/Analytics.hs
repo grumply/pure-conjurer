@@ -9,7 +9,7 @@ import Pure.Data.Txt
 import Pure.Data.Time
 import Pure.Data.Marker
 import Pure.Router (route)
-import Pure.Elm.Component (Default(..),timed,HasCallStack)
+import Pure.Elm.Component (HasCallStack,timed,Default(..))
 import Pure.Sorcerer hiding (events)
 import qualified Pure.Sorcerer as Sorcerer
 import Pure.WebSocket as WS hiding (Nat,rep)
@@ -31,7 +31,7 @@ import Unsafe.Coerce
 import System.IO.Unsafe
 
 import Data.ByteString.Lazy (ByteString)
-import Data.Map.Strict as Map hiding (mapMaybe)
+import Data.Map.Strict as Map
 import Data.Set as Set
 
 #ifndef __GHCJS__
@@ -91,6 +91,7 @@ data Session = Session
   , end       :: Time
   , ip        :: IP
   , user      :: Maybe Username
+  , events    :: [(Time,Txt)]
   } deriving stock Generic
     deriving anyclass (ToJSON,FromJSON)
 
@@ -118,6 +119,7 @@ instance Aggregable SessionMsg Session where
       { start = t 
       , end = t 
       , user = Nothing 
+      , events = []
       , ..
       }
 
@@ -125,6 +127,12 @@ instance Aggregable SessionMsg Session where
     Sorcerer.Update ses 
       { end = t
       , user = Just un 
+      }
+
+  update (SessionEvent t ev) (Just ses) = 
+    Sorcerer.Update ses 
+      { end = t
+      , events = (t,ev) : events ses 
       }
 
   update (SessionEnd t) (Just ses) = 
@@ -421,12 +429,11 @@ listUnique
      ) => IO [(Context a,Name a)]
 listUnique = do
   uniqueSessionIds <- listSessionsForNamespace @a
-  streamNub . mapMaybe parse . Prelude.concat <$> traverse getEvents uniqueSessionIds
+  streamNub . catMaybes . Prelude.concatMap resources <$> sessions uniqueSessionIds
   where
-    getEvents = Sorcerer.events . SessionStream
+    resources Session {..} = fmap parse events
 
-    parse (SessionEvent _ evt) = unsafePerformIO (route (readRoute (,)) evt)
-    parse _ = Nothing
+    parse (_,evt) = unsafePerformIO (route (readRoute (,)) evt)
 
 listUniqueContexts
   :: forall a.
@@ -436,16 +443,14 @@ listUniqueContexts
     ) => IO [Context a]
 listUniqueContexts = do
   uniqueSessionIds <- listSessionsForNamespace @a
-  streamNub . mapMaybe parse . Prelude.concat <$> traverse getEvents uniqueSessionIds
+  streamNub . catMaybes . Prelude.concatMap contexts <$> sessions uniqueSessionIds
   where
-    getEvents = Sorcerer.events . SessionStream
+    contexts Session {..} = fmap parse events
 
-    parse (SessionEvent _ evt) =
+    parse (_,evt) =
       case unsafePerformIO (route (readRoute (,)) evt) of
         Just (ctx,_) -> Just ctx
         _ -> Nothing
-    parse _ =
-      Nothing
 
 analyticsCountForContext 
   :: forall a. 
@@ -488,16 +493,14 @@ listUniqueResources
     ) => Context a -> IO [Name a]
 listUniqueResources ctx = do
   uniqueSessionIds <- listSessionsForNamespace @a
-  streamNub . mapMaybe parse . Prelude.concat <$> traverse getEvents uniqueSessionIds
+  streamNub . catMaybes . Prelude.concatMap resources <$> sessions uniqueSessionIds
   where
-    getEvents = Sorcerer.events . SessionStream
+    resources Session {..} = fmap parse events
 
-    parse (SessionEvent _ evt) =
+    parse (_,evt) =
       case unsafePerformIO (route (readRoute (,)) evt) of
         Just (ctx',nm) | ctx == ctx' -> Just nm
         _ -> Nothing
-    parse _ = 
-      Nothing
 
 analyticsCountForResource
   :: forall a. 
@@ -771,11 +774,10 @@ buildPopularForNamespace = timed do
       ss <- listSessionsForResource ctx nm >>= sessions
       foldM (withSession n) acc ss
       where
-        withSession n acc Session {..} = do
-          evs <- Sorcerer.events (SessionStream sessionid)
-          foldM withEvent acc evs
+        withSession n acc Session {..} = 
+          foldM withEvent acc events
           where
-            withEvent acc (SessionEvent (Milliseconds (fromIntegral -> t) _) evt) = do
+            withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = do
               mctxnm <- route (readRoute (,)) evt
               case mctxnm of
                 Just (ctx',nm') | ctx == ctx', nm == nm' ->
@@ -793,7 +795,6 @@ buildPopularForNamespace = timed do
                         pure acc
                 _ -> 
                   pure acc
-            withEvent acc _ = pure acc
 
 buildTopForNamespace 
   :: forall a. 
@@ -820,11 +821,10 @@ buildTopForNamespace = timed do
       ss <- listSessionsForResource ctx nm >>= sessions
       foldM (withSession n) acc ss
       where
-        withSession n acc Session {..} = do
-          evs <- Sorcerer.events (SessionStream sessionid)
-          foldM withEvent acc evs
+        withSession n acc Session {..} =
+          foldM withEvent acc events
           where
-            withEvent acc (SessionEvent _ evt) = do
+            withEvent acc (_,evt) = do
               mctxnm <- route (readRoute (,)) evt
               case mctxnm of
                 Just (ctx',nm') | ctx == ctx', nm == nm' ->
@@ -841,7 +841,6 @@ buildTopForNamespace = timed do
                         pure acc
                 _ ->
                   pure acc
-            withEvent acc _ = pure acc
 
 buildRecentForNamespace 
   :: forall a. 
@@ -897,11 +896,10 @@ buildPopularForContext ctx = timed do
       ss <- listSessionsForResource ctx nm >>= sessions
       foldM (withSession n) acc ss
       where
-        withSession n acc Session {..} = do
-          evs <- Sorcerer.events (SessionStream sessionid)
-          foldM withEvent acc evs
+        withSession n acc Session {..} =
+          foldM withEvent acc events
           where
-            withEvent acc (SessionEvent (Milliseconds (fromIntegral -> t) _) evt) = do
+            withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = do
               mctxnm <- route (readRoute (,)) evt
               case mctxnm of
                 Just (ctx',nm') | ctx == ctx', nm == nm' ->
@@ -919,7 +917,6 @@ buildPopularForContext ctx = timed do
                         pure acc
                 _ ->
                   pure acc
-            withEvent acc _ = pure acc
 
 buildTopForContext 
   :: forall a. 
@@ -944,11 +941,10 @@ buildTopForContext ctx = timed do
       ss <- listSessionsForResource ctx nm >>= sessions
       foldM (withSession n) acc ss
       where
-        withSession n acc Session {..} = do
-          evs <- Sorcerer.events (SessionStream sessionid)
-          foldM withEvent acc evs
+        withSession n acc Session {..} = 
+          foldM withEvent acc events
           where
-            withEvent acc (SessionEvent _ evt) = do
+            withEvent acc (_,evt) = do
               mctxnm <- route (readRoute (,)) evt
               case mctxnm of
                 Just (ctx',nm') | ctx == ctx', nm == nm' ->
@@ -965,7 +961,6 @@ buildTopForContext ctx = timed do
                         pure acc
                 _ ->
                   pure acc
-            withEvent acc _ = pure acc
 
 buildRecentForContext
   :: forall a. 
@@ -1013,11 +1008,10 @@ buildRelatedPopularForNamespace = timed do
       let !v = oldv * 2 ** ((oldt - newt) / d) + newv
       in (newt,v)
 
-    withSession c acc Session {..} = do
-      evs <- Sorcerer.events (SessionStream sessionid)
-      foldM withEvent acc evs
+    withSession c acc Session {..} =
+      foldM withEvent acc events
       where
-        withEvent acc (SessionEvent (Milliseconds (fromIntegral -> t) _) evt) = 
+        withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1030,7 +1024,6 @@ buildRelatedPopularForNamespace = timed do
                 in pure $! Map.insert evt (b,newt,newv) acc
               else
                 pure acc
-        withEvent acc _ = pure acc
 
 -- Consider weighting distance from target in session.
 buildRelatedTopForNamespace 
@@ -1051,11 +1044,10 @@ buildRelatedTopForNamespace = timed do
     result = fmap fst sorted
   pure result
   where
-    withSession c acc Session {..} = do
-      evs <- Sorcerer.events (SessionStream sessionid)
-      foldM withEvent acc evs
+    withSession c acc Session {..} =
+      foldM withEvent acc events
       where
-        withEvent acc (SessionEvent _ evt) = 
+        withEvent acc (_,evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1067,7 +1059,6 @@ buildRelatedTopForNamespace = timed do
                 pure $! Map.insert evt (b,oldv + 1) acc
               else
                 pure acc
-        withEvent acc _ = pure acc
 
 -- Consider weighting distance from target in session.
 buildRelatedPopularForContext 
@@ -1095,11 +1086,10 @@ buildRelatedPopularForContext ctx = timed do
       let !v = oldv * 2 ** ((oldt - newt) / d) + newv
       in (newt,v)
 
-    withSession c acc Session {..} = do
-      evs <- Sorcerer.events (SessionStream sessionid)
-      foldM withEvent acc evs
+    withSession c acc Session {..} =
+      foldM withEvent acc events
       where
-        withEvent acc (SessionEvent (Milliseconds (fromIntegral -> t) _) evt) = 
+        withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1112,7 +1102,6 @@ buildRelatedPopularForContext ctx = timed do
                 in pure $! Map.insert evt (b,newt,newv) acc
               else
                 pure acc
-        withEvent acc _ = pure acc
 
 -- Consider weighting distance from target in session.
 buildRelatedTopForContext 
@@ -1133,11 +1122,10 @@ buildRelatedTopForContext ctx = timed do
     result = fmap fst sorted
   pure result
   where
-    withSession c acc Session {..} = do
-      evs <- Sorcerer.events (SessionStream sessionid)
-      foldM withEvent acc evs
+    withSession c acc Session {..} =
+      foldM withEvent acc events
       where
-        withEvent acc (SessionEvent _ evt) = 
+        withEvent acc (_,evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1149,7 +1137,6 @@ buildRelatedTopForContext ctx = timed do
                 pure $! Map.insert evt (b,oldv + 1) acc
               else
                 pure acc
-        withEvent acc _ = pure acc
 
 -- Consider weighting distance from target in session.
 buildRelatedPopularForResource 
@@ -1177,11 +1164,10 @@ buildRelatedPopularForResource ctx nm = timed do
       let !v = oldv * 2 ** ((oldt - newt) / d) + newv
       in (newt,v)
 
-    withSession c acc Session {..} = do
-      evs <- Sorcerer.events (SessionStream sessionid)
-      foldM withEvent acc evs
+    withSession c acc Session {..} =
+      foldM withEvent acc events
       where
-        withEvent acc (SessionEvent (Milliseconds (fromIntegral -> t) _) evt) = 
+        withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1194,7 +1180,6 @@ buildRelatedPopularForResource ctx nm = timed do
                 in pure $! Map.insert evt (b,newt,newv) acc
               else
                 pure acc
-        withEvent acc _ = pure acc
 
 -- Consider weighting distance from target in session.
 buildRelatedTopForResource 
@@ -1215,11 +1200,10 @@ buildRelatedTopForResource ctx nm = timed do
     result = fmap fst sorted
   pure result
   where
-    withSession c acc Session {..} = do
-      evs <- Sorcerer.events (SessionStream sessionid)
-      foldM withEvent acc evs
+    withSession c acc Session {..} =
+      foldM withEvent acc events
       where
-        withEvent acc (SessionEvent _ evt) = 
+        withEvent acc (_,evt) = 
           case Map.lookup evt acc of
             Nothing -> do
               b <- new 0.01 c
@@ -1231,7 +1215,6 @@ buildRelatedTopForResource ctx nm = timed do
                 pure $! Map.insert evt (b,oldv + 1) acc
               else
                 pure acc
-        withEvent acc _ = pure acc
 
 --------------------------------------------------------------------------------
 
