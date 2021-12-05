@@ -1,16 +1,17 @@
-{-# language GADTs, ScopedTypeVariables #-}
+{-# language GADTs, ScopedTypeVariables, DuplicateRecordFields #-}
 module Pure.Conjurer.Analytics where
 
 import Pure.Auth (Username)
 import Pure.Conjurer
-import Pure.Data.Bloom as Bloom
+import Pure.Bloom.Scalable as Bloom
 import Pure.Data.JSON hiding (encode,decode)
 import Pure.Data.Txt
 import Pure.Data.Time
 import Pure.Data.Marker
 import Pure.Router (route)
-import Pure.Elm.Component (Default(..))
+import Pure.Elm.Component (HasCallStack,timed,Default(..))
 import Pure.Sorcerer hiding (events)
+import Pure.Sorcerer.Manager (Manageable(..))
 import qualified Pure.Sorcerer as Sorcerer
 import Pure.WebSocket as WS hiding (Nat,rep)
 
@@ -77,7 +78,7 @@ fromWebSocket ws_ = do
 
 newtype SessionId = SessionId Marker
   deriving stock Generic
-  deriving (ToJSON,FromJSON,Eq,Ord,Hashable) via Marker
+  deriving (ToJSON,FromJSON,Eq,Ord,Hashable,ToTxt) via Marker
   deriving anyclass Pathable
 
 newSessionId :: IO SessionId
@@ -91,7 +92,6 @@ data Session = Session
   , end       :: Time
   , ip        :: IP
   , user      :: Maybe Username
-  , events    :: [(Time,Txt)]
   } deriving stock Generic
     deriving anyclass (ToJSON,FromJSON)
 
@@ -119,7 +119,6 @@ instance Aggregable SessionMsg Session where
       { start = t 
       , end = t 
       , user = Nothing 
-      , events = []
       , ..
       }
 
@@ -127,12 +126,6 @@ instance Aggregable SessionMsg Session where
     Sorcerer.Update ses 
       { end = t
       , user = Just un 
-      }
-
-  update (SessionEvent t ev) (Just ses) = 
-    Sorcerer.Update ses 
-      { end = t
-      , events = (t,ev) : events ses 
       }
 
   update (SessionEnd t) (Just ses) = 
@@ -167,114 +160,361 @@ instance Aggregable SessionsMsg Sessions where
   
   aggregate = "sessions.aggregate"
 
+sessionsCount :: IO Int
+sessionsCount = 
+  Sorcerer.read SessionsStream >>= \case
+    Just (Sessions _ n) -> pure n
+    _ -> pure 0
+
+oldestSession :: IO Time
+oldestSession =
+  Sorcerer.read SessionsStream >>= \case
+    Just (Sessions t _) -> pure t
+    _ -> time
+
+listSessions :: IO [SessionId]
+listSessions = fmap getSessionId <$> Sorcerer.events SessionsStream
+  where getSessionId (SessionCreated _ sid) = sid
+
 --------------------------------------------------------------------------------
 
-data GlobalAnalytics = GlobalAnalytics {-# UNPACK #-}!Time {-# UNPACK #-}!Int
+data GlobalAnalytics = GlobalAnalytics {-# UNPACK #-}!Int {-# UNPACK #-}!Int
   deriving stock Generic
   deriving anyclass (ToJSON,FromJSON)
 
-data GlobalAnalyticsMsg a
-  = GlobalAnalyticsEvent Time SessionId
+data GlobalAnalyticsMsg
+  = GlobalAnalyticsEvent Time SessionId IP Txt
+  | GlobalResourceCreated Time SessionId Txt
   deriving stock Generic
   deriving anyclass (ToJSON,FromJSON)
 
-instance ( Typeable a) => Streamable (GlobalAnalyticsMsg a) where
-  data Stream (GlobalAnalyticsMsg a) = GlobalAnalyticsStream
+instance Streamable GlobalAnalyticsMsg where
+  data Stream GlobalAnalyticsMsg = GlobalAnalyticsStream
     deriving stock (Generic,Eq,Ord)
     deriving anyclass Hashable
 
   stream GlobalAnalyticsStream = 
-    "conjurer/analytics/global/" 
-      ++ fromTxt (rep @a)
-      ++ ".stream"
+    "conjurer/analytics/analytics.stream"
 
-instance ( Typeable a) => Aggregable (GlobalAnalyticsMsg a) GlobalAnalytics where
-  update (GlobalAnalyticsEvent t _) Nothing = Sorcerer.Update (GlobalAnalytics t 1)
-  update _ (Just (GlobalAnalytics t n)) = Sorcerer.Update (GlobalAnalytics t (n + 1))
+instance Manageable GlobalAnalyticsMsg where
+  -- Don't burden the IO subsystem with unimportant writes
+  threshold = Seconds 1 0
+  batch = 100
+
+instance Aggregable GlobalAnalyticsMsg GlobalAnalytics where
+  update (GlobalAnalyticsEvent _ _ _ _) = Sorcerer.Update . \case
+    Just (GlobalAnalytics n m) -> GlobalAnalytics (n + 1) m
+    Nothing                    -> GlobalAnalytics 1 0
+  update (GlobalResourceCreated _ _ _) = Sorcerer.Update . \case
+    Just (GlobalAnalytics n m) -> GlobalAnalytics n (m + 1)
+    Nothing                    -> GlobalAnalytics 0 1
 
   aggregate = "analytics.aggregate"
 
---------------------------------------------------------------------------------
+-- Used for seeding bloom filters during event analysis.
+eventsCount :: IO Int
+eventsCount =
+  Sorcerer.read GlobalAnalyticsStream >>= \case
+    Just (GlobalAnalytics n _) -> pure n
+    _ -> pure 0
 
-data ContextAnalytics = ContextAnalytics {-# UNPACK #-}!Time {-# UNPACK #-}!Int
-  deriving stock Generic
-  deriving anyclass (ToJSON,FromJSON)
-
-data ContextAnalyticsMsg a
-  = ContextAnalyticsEvent Time SessionId
-  deriving stock Generic
-  deriving anyclass (ToJSON,FromJSON)
-
-instance 
-  ( Typeable a
-  , Hashable (Context a), Pathable (Context a)
-  ) => Streamable (ContextAnalyticsMsg a) 
-  where
-    data Stream (ContextAnalyticsMsg a) = ContextAnalyticsStream (Context a)
-      deriving stock Generic
-
-    stream (ContextAnalyticsStream ctx) = 
-      "conjurer/analytics/contexts/" 
-        ++ fromTxt (rep @a)
-        ++ fromTxt (toPath ctx)
-        ++ ".stream"
-
-deriving instance (Eq (Context a)) => Eq (Stream (ContextAnalyticsMsg a))
-deriving instance (Ord (Context a)) => Ord (Stream (ContextAnalyticsMsg a))
-deriving instance (Hashable (Context a)) => Hashable (Stream (ContextAnalyticsMsg a))
-
-instance 
-  ( Typeable a
-  , Hashable (Context a), Pathable (Context a)
-  ) => Aggregable (ContextAnalyticsMsg a) ContextAnalytics 
-  where
-    update (ContextAnalyticsEvent t _) Nothing = Sorcerer.Update (ContextAnalytics t 1)
-    update _ (Just (ContextAnalytics t n)) = Sorcerer.Update (ContextAnalytics t (n + 1))
-
-    aggregate = "analytics.aggregate"
+-- Used for seeding bloom filters during event analysis.
+resourceCount :: IO Int
+resourceCount =
+  Sorcerer.read GlobalAnalyticsStream >>= \case
+    Just (GlobalAnalytics _ n) -> pure n
+    _ -> pure 0
 
 --------------------------------------------------------------------------------
 
-data ResourceAnalytics = ResourceAnalytics {-# UNPACK #-}!Time {-# UNPACK #-}!Int
-  deriving stock Generic
-  deriving anyclass (ToJSON,FromJSON)
+type Association = (Time,Double,Int)
+type Associations = Map Txt Association
 
-data ResourceAnalyticsMsg a
-  = ResourceAnalyticsEvent Time SessionId
-  deriving stock Generic
-  deriving anyclass (ToJSON,FromJSON)
+type Analysis = (Time,Time,Double,Int,Associations)
+type Analyses = Map Txt Analysis
+pattern Analysis 
+  :: Time -> Time -> Double -> Int -> Map Txt (Time,Double,Int) 
+  -> Analysis
+pattern Analysis { created, latest, decaying, count, associations } = 
+  (created,latest,decaying,count,associations)
+
+
+data Analyzer = Analyzer
+  { analyses :: Analyses
+  , hits     :: Bloom -- IP/resource pairs
+  , sessions :: Bloom
+  }
+
+-- Finalize corrects for staleness. This must be run for accurate results!
+finalize :: Time -> Time -> Analyzer -> Analyzer
+finalize decay@(Milliseconds d _) now@(Milliseconds n _) Analyzer { analyses, .. } =
+  Analyzer { analyses = fmap updateAnalysis analyses, ..  }
+  where
+    updateAnalysis Analysis {..} = 
+      let 
+        Milliseconds l _ = latest
+      in 
+        Analysis
+          { latest   = now 
+          , decaying = decaying * 2 ** (fromIntegral (l - n) / fromIntegral d) + 1
+          , count    = count + 1
+          , associations = fmap updateAssociation associations
+          , ..
+          }
+        
+    updateAssociation (latest,decaying,count) =
+      let 
+        Milliseconds l _ = latest
+        decaying' = decaying * 2 ** (fromIntegral (l - n) / fromIntegral d) + 1
+      in 
+        (latest,decaying',count + 1)
+
+analyzeAll :: HasCallStack => Time -> IO Analyses
+analyzeAll _decay@(Milliseconds (fromIntegral -> d) _) = timed do 
+
+  -- c is a critical value. Ranking is performed by
+  -- taking the lower bound of a beta distribution 
+  -- constructed from the count of hits or the decayed
+  -- count of hits and the total count of events minus
+  -- the count of hits.
+  c <- eventsCount
+
+  start <- 
+    Analyzer
+      <$> pure Map.empty
+      <*> Bloom.new 0.001 c
+      <*> (Bloom.new 0.001 =<< sessionsCount)
+
+  evs <- Sorcerer.events GlobalAnalyticsStream
+  
+  analyzer <- foldM analyzeGlobalStream start evs
+  now <- time
+  pure (analyses (finalize _decay now analyzer))
+
+  where
+    analyzeGlobalStream Analyzer {..} = \case
+
+      GlobalResourceCreated t _ r -> do
+        let
+          add = \case
+            Nothing -> 
+              Analysis
+                { created      = t
+                , latest       = t
+                , decaying     = 1
+                , count        = 1
+                , associations = Map.empty
+                }
+
+            -- Confusingly, analyzeSessionStream may add a 
+            -- resource before analyzeGlobalStream does.
+            -- So, we need to correct the time; this could 
+            -- make the decaying value slightly incorrect
+            -- but it shouldn't be too far off.
+            Just Analysis {..} -> 
+              Analysis 
+                { created = t
+                , .. 
+                }
+
+        pure Analyzer
+          { analyses = Map.alter (Just . add) r analyses 
+          , ..
+          }
+
+      GlobalAnalyticsEvent t sid ip hit -> do
+
+        let
+          create Nothing = 
+            Analysis
+              { created      = t
+              , latest       = t
+              , decaying     = 1
+              , count        = 1
+              , associations = Map.empty
+              }
+
+          create (Just Analysis {..}) = 
+            let 
+              Milliseconds c _ = created
+              Milliseconds n _ = t
+            in 
+              Analysis 
+                { decaying = decaying * 2 ** (fromIntegral (c - n) / fromIntegral d) + 1
+                , count    = count + 1
+                , .. 
+                }
+
+          new = 
+            Analyzer 
+              { analyses = Map.alter (Just . create) hit analyses 
+              , ..
+              }
+              
+        newVisit <- Bloom.update hits (toTxt ip <> hit) 
+        if newVisit then do
+
+          newSession <- Bloom.update sessions sid
+          if newSession then do
+
+            evs <- Sorcerer.events (SessionStream sid)
+            snd <$> foldM analyzeSessionStream (Nothing,new) evs
+
+          else
+
+            pure new
+
+        else
+
+          pure Analyzer {..}
+
+    analyzeSessionStream (source,Analyzer {..}) = \case
+
+      SessionEvent t destination ->
+        
+        let 
+          analyses' = maybe id (Map.alter (Just . add)) source analyses 
+            where
+              add = \case
+                Nothing -> 
+                  Analysis
+                    { created      = t
+                    , latest       = t
+                    , decaying     = 1
+                    , count        = 1
+                    , associations = Map.singleton destination (t,1,1)
+                    }
+
+                Just Analysis {..} ->
+                  Analysis 
+                    { associations = Map.alter (Just . upd) destination associations
+                    , ..
+                    }
+
+              upd = \case
+                Nothing -> (t,1,1)
+
+                -- the `+ 1` is a good extension point for enrichment
+                Just (Milliseconds l _,decaying,count) -> 
+                  let 
+                    Milliseconds n _ = t
+                    decaying' = decaying * 2 ** (fromIntegral (l - n) / fromIntegral d) + 1 
+                  in 
+                    (t,decaying',count + 1)
+
+        in
+          pure (Just destination,Analyzer { analyses = analyses', .. })
+
+      _ -> 
+        pure (source,Analyzer {..})
+
+--------------------------------------------------------------------------------
+-- TODO: switch to a true graph-based approach, since there are some nice
+-- algorithms for these sorts of analyses.
+
+data Analyzed a = Analyzed
+  { popular                  :: [(Context a,Name a)]
+  , top                      :: [(Context a,Name a)]
+  , recent                   :: [(Context a,Name a)]
+  , popularByContext         :: Map (Context a) [(Context a,Name a)]
+  , topByContext             :: Map (Context a) [(Context a,Name a)]
+  , recentByContext          :: Map (Context a) [(Context a,Name a)]
+  , relatedPopularByResource :: Map (Context a,Name a) [Txt]
+  , relatedTopByResource     :: Map (Context a,Name a) [Txt]
+  }
+
+toAnalyzed :: forall a. (Rootable a, Routable a, Ord (Context a), Ord (Name a)) => Analyses -> Analyzed a
+toAnalyzed analyses = Analyzed {..}
+  where
+
+    matches :: [((Context a,Name a),Analysis)]
+    matches = catMaybes . fmap match . Map.toList $ analyses
+      where
+        parse :: Txt -> Maybe (Context a,Name a)
+        -- Not sure what approach I should take to make this safe.
+        parse evt = unsafePerformIO (route (readRoute (,)) evt)
+
+        match (evt,analysis) 
+          | Just ctxnm <- parse evt = Just (ctxnm,analysis)
+          | otherwise = Nothing
+
+    contexts :: [Context a]
+    contexts = streamNub . fmap (fst . fst) $ matches
+
+
+    popular, top, recent :: [(Context a,Name a)]
+    popular = fmap fst (sortBy (flip compare `on` fmap target) matches)
+      where
+        target Analysis { decaying } = decaying
+
+    top = fmap fst (sortBy (flip compare `on` fmap target) matches)
+      where
+        target Analysis { count } = count
+        
+    recent = fmap fst (sortBy (flip compare `on` fmap target) matches)
+      where
+        target Analysis { created } = created
+
+
+    popularByContext, topByContext, recentByContext :: Map (Context a) [(Context a,Name a)]
+    popularByContext = Map.fromList (fmap go contexts)
+      where
+        go context = (context,List.filter ((== context) . fst) popular)
+
+    topByContext = Map.fromList (fmap go contexts)
+      where
+        go context = (context,List.filter ((== context) . fst) top)
+ 
+    recentByContext = Map.fromList (fmap go contexts)
+      where
+        go context = (context,List.filter ((== context) . fst) recent)
+
+
+    relatedPopularByResource, relatedTopByResource :: Map (Context a,Name a) [Txt]
+    relatedPopularByResource = Map.fromList . fmap (fmap extract) $ matches
+      where
+        extract Analysis { associations } = fmap fst . sortBy (flip compare `on` fmap target) . Map.toList $ associations
+          where
+            target (_,decaying,_) = decaying
+
+    relatedTopByResource = Map.fromList . fmap (fmap extract) $ matches
+      where
+        extract Analysis { associations } = fmap fst . sortBy (flip compare `on` fmap target) . Map.toList $ associations
+          where
+            target (_,_,count) = count
+
+class Analyzeable (as :: [*]) where
+  analyzeEach :: HasCallStack => Analyses -> IO ()
+
+instance Analyzeable '[] where
+  analyzeEach _ = pure ()
 
 instance 
   ( Typeable a
-  , Hashable (Context a), Pathable (Context a)
-  , Hashable (Name a), Pathable (Name a)
-  ) => Streamable (ResourceAnalyticsMsg a) 
+  , Rootable a, Routable a
+  , Ord (Context a), Hashable (Context a), Pathable (Context a), ToJSON (Context a)
+  , Ord (Name a), Hashable (Name a), Pathable (Name a), ToJSON (Name a)
+  , Analyzeable as
+  ) => Analyzeable (a : as) 
   where
-    data Stream (ResourceAnalyticsMsg a) = ResourceAnalyticsStream (Context a) (Name a)
-      deriving stock Generic
+    analyzeEach analyses = timed do
+      let Analyzed {..} = toAnalyzed @a analyses
 
-    stream (ResourceAnalyticsStream ctx nm) = 
-      "conjurer/analytics/resources/" 
-        ++ fromTxt (rep @a)
-        ++ fromTxt (toPath ctx)
-        ++ fromTxt (toPath nm)
-        ++ ".stream"
+      addPopularForNamespaceToCache popular
+      addTopForNamespaceToCache top
+      addRecentForNamespaceToCache recent
 
-deriving instance (Eq (Context a) , Eq (Name a)) => Eq (Stream (ResourceAnalyticsMsg a))
-deriving instance (Ord (Context a), Ord (Name a)) => Ord (Stream (ResourceAnalyticsMsg a))
-deriving instance (Hashable (Context a), Hashable (Name a)) => Hashable (Stream (ResourceAnalyticsMsg a))
+      for_ (Map.toList popularByContext) (uncurry addPopularForContextToCache)
+      for_ (Map.toList topByContext) (uncurry addTopForContextToCache)
+      for_ (Map.toList recentByContext) (uncurry addRecentForContextToCache) 
 
-instance 
-  ( Typeable a
-  , Hashable (Context a), Pathable (Context a)
-  , Hashable (Name a), Pathable (Name a)
-  ) => Aggregable (ResourceAnalyticsMsg a) ResourceAnalytics 
-  where
-    update (ResourceAnalyticsEvent t _) Nothing = Sorcerer.Update (ResourceAnalytics t 1)
-    update _ (Just (ResourceAnalytics t n)) = Sorcerer.Update (ResourceAnalytics t (n + 1))
+      for_ (Map.toList relatedPopularByResource) $ \((ctx,nm),pop) ->
+        addRelatedPopularForResourceToCache ctx nm pop
+      for_ (Map.toList relatedTopByResource) $ \((ctx,nm),top) ->
+        addRelatedTopForResourceToCache ctx nm top
 
-    aggregate = "analytics.aggregate"
-
+      analyzeEach @as analyses
+      
 --------------------------------------------------------------------------------
 
 recordStart :: WebSocket -> IO SessionId
@@ -282,19 +522,15 @@ recordStart ws = do
   ip  <- fromWebSocket ws
   sid <- newSessionId
   now <- time
-
   Sorcerer.write SessionsStream do
     SessionCreated now sid
-
   Sorcerer.write (SessionStream sid) do
     SessionStart sid now ip
-
   pure sid
 
 recordUser :: SessionId -> Username -> IO ()
 recordUser sid un = do
   now <- time 
-
   Sorcerer.write (SessionStream sid) do
     SessionUser now un
 
@@ -306,33 +542,38 @@ recordRead
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => SessionId -> Context a -> Name a -> IO ()
-recordRead sid ctx nm = do
+    ) => SessionId -> IP -> Context a -> Name a -> IO ()
+recordRead sid ip ctx nm = do
   now <- time
-
+  let r = toReadRoute ctx nm
   Sorcerer.write (SessionStream sid) do
-    SessionEvent now (toReadRoute ctx nm)
+    SessionEvent now r
+  Sorcerer.write GlobalAnalyticsStream do
+    GlobalAnalyticsEvent now sid ip r
 
-  Sorcerer.write (GlobalAnalyticsStream @a) do
-    GlobalAnalyticsEvent now sid
-
-  Sorcerer.write (ContextAnalyticsStream ctx) do
-    ContextAnalyticsEvent now sid
-
-  Sorcerer.write (ResourceAnalyticsStream ctx nm) do
-    ResourceAnalyticsEvent now sid
+recordCreate
+  :: forall a.
+    ( Typeable a
+    , Routable a
+    , ToJSON (Context a), FromJSON (Context a)
+    , Hashable (Context a), Pathable (Context a), Ord (Context a)
+    , ToJSON (Name a), FromJSON (Name a)
+    , Hashable (Name a), Pathable (Name a), Ord (Name a)
+    ) => SessionId -> Context a -> Name a -> IO ()
+recordCreate sid ctx nm = do
+  now <- time
+  Sorcerer.write GlobalAnalyticsStream do
+    GlobalResourceCreated now sid (toReadRoute ctx nm)
 
 recordEvent :: SessionId -> Txt -> IO ()
 recordEvent sid evt = do
   now <- time
-
   Sorcerer.write (SessionStream sid) do
     SessionEvent now evt
 
 recordEnd :: SessionId -> IO ()
 recordEnd sid = do
   now <- time
-
   Sorcerer.write (SessionStream sid) do
     SessionEnd now
 
@@ -346,12 +587,16 @@ addAnalytics
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    )  => SessionId -> Callbacks a -> Callbacks a
-addAnalytics sid cbs = cbs { onRead = analyzeRead }
+    )  => SessionId -> IP -> Callbacks a -> Callbacks a
+addAnalytics sid ip cbs = cbs { onRead = analyzeRead }
   where
     analyzeRead ctx name product = do
-      recordRead sid ctx name
+      recordRead sid ip ctx name
       onRead cbs ctx name product
+      
+    analyzeCreate ctx name res pro pre lst = do
+      recordCreate sid ctx name
+      onCreate cbs ctx name res pro pre lst
 
 --------------------------------------------------------------------------------
 
@@ -370,203 +615,19 @@ streamNubOn f = go Set.empty
 streamNub :: Ord a => [a] -> [a]
 streamNub = streamNubOn id
 
---------------------------------------------------------------------------------
-
-sessionsCount :: IO Int
-sessionsCount = 
-  Sorcerer.read SessionsStream >>= \case
-    Just (Sessions _ n) -> pure n
-    _ -> pure 0
-
-oldestSession :: IO Time
-oldestSession =
-  Sorcerer.read SessionsStream >>= \case
-    Just (Sessions t _) -> pure t
-    _ -> time
-
-listSessions :: IO [SessionId]
-listSessions = streamNub . fmap getSessionId <$> Sorcerer.events SessionsStream
-  where getSessionId (SessionCreated _ sid) = sid
-
-analyticsCountForNamespace 
-  :: forall a. 
-    ( Typeable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => IO Int
-analyticsCountForNamespace =
-  Sorcerer.read (GlobalAnalyticsStream @a) >>= \case
-    Just (GlobalAnalytics _ n) -> pure n
-    _ -> pure 0
-
-oldestSessionForNamespace 
-  :: forall a. 
-    ( Typeable a 
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => IO Time
-oldestSessionForNamespace =
-  Sorcerer.read (GlobalAnalyticsStream @a) >>= \case
-    Just (GlobalAnalytics t _) -> pure t
-    _ -> time
-
-listSessionsForNamespace 
-  :: forall a. 
-    ( Typeable a 
-    , Hashable (Context a), Pathable (Context a)
-    , Hashable (Name a), Pathable (Name a)
-    ) => IO [SessionId]
-listSessionsForNamespace = 
-  streamNub . fmap getSessionId <$> Sorcerer.events (GlobalAnalyticsStream @a)
-  where 
-    getSessionId (GlobalAnalyticsEvent _ sid) = sid
-
-listUnique
-  :: forall a.
-     ( Typeable a
-     , Hashable (Context a), Pathable (Context a), Ord (Context a)
-     , Hashable (Name a), Pathable (Name a), Ord (Name a)
-     ) => IO [(Context a,Name a)]
-listUnique = do
-  uniqueSessionIds <- listSessionsForNamespace @a
-  streamNub . catMaybes . Prelude.concatMap resources <$> sessions uniqueSessionIds
+bloomNubOn :: ToTxt x => (a -> x) -> [a] -> IO [a]
+bloomNubOn f xs = unsafeInterleaveIO do
+  b <- bloom 0.001
+  go b xs
   where
-    resources Session {..} = fmap parse events
+    go _ [] = pure []
+    go b (a : as) =
+      Bloom.update b (f a) >>= \case
+        True -> (a:) <$> go b as
+        _ -> go b as
 
-    parse (_,evt) = unsafePerformIO (route (readRoute (,)) evt)
-
-listUniqueContexts
-  :: forall a.
-    ( Typeable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a)
-    ) => IO [Context a]
-listUniqueContexts = do
-  uniqueSessionIds <- listSessionsForNamespace @a
-  streamNub . catMaybes . Prelude.concatMap contexts <$> sessions uniqueSessionIds
-  where
-    contexts Session {..} = fmap parse events
-
-    parse (_,evt) =
-      case unsafePerformIO (route (readRoute (,)) evt) of
-        Just (ctx,_) -> Just ctx
-        _ -> Nothing
-
-analyticsCountForContext 
-  :: forall a. 
-    ( Typeable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> IO Int
-analyticsCountForContext ctx =
-  Sorcerer.read (ContextAnalyticsStream ctx) >>= \case
-    Just (ContextAnalytics _ n) -> pure n
-    _ -> pure 0
-
-oldestSessionForContext
-  :: forall a. 
-    ( Typeable a 
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> IO Time
-oldestSessionForContext ctx =
-  Sorcerer.read (ContextAnalyticsStream ctx) >>= \case
-    Just (ContextAnalytics t _) -> pure t
-    _ -> time
-
-listSessionsForContext 
-  :: forall a. 
-    ( Typeable a
-    , Hashable (Context a), Pathable (Context a)
-    , Hashable (Name a), Pathable (Name a)
-    ) => Context a -> IO [SessionId]
-listSessionsForContext ctx = 
-  streamNub . fmap getSessionId <$> Sorcerer.events (ContextAnalyticsStream ctx)
-  where 
-    getSessionId (ContextAnalyticsEvent _ sid) = sid
-
-listUniqueResources
-  :: forall a.
-    ( Typeable a
-    , Hashable (Context a), Pathable (Context a), Eq (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> IO [Name a]
-listUniqueResources ctx = do
-  uniqueSessionIds <- listSessionsForNamespace @a
-  streamNub . catMaybes . Prelude.concatMap resources <$> sessions uniqueSessionIds
-  where
-    resources Session {..} = fmap parse events
-
-    parse (_,evt) =
-      case unsafePerformIO (route (readRoute (,)) evt) of
-        Just (ctx',nm) | ctx == ctx' -> Just nm
-        _ -> Nothing
-
-analyticsCountForResource
-  :: forall a. 
-    ( Typeable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> Name a -> IO Int
-analyticsCountForResource ctx nm =
-  Sorcerer.read (ResourceAnalyticsStream ctx nm) >>= \case
-    Just (ResourceAnalytics _ n) -> pure n
-    _ -> pure 0
-
-oldestSessionForResource
-  :: forall a. 
-    ( Typeable a 
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> Name a -> IO Time
-oldestSessionForResource ctx nm =
-  Sorcerer.read (ResourceAnalyticsStream ctx nm) >>= \case
-    Just (ResourceAnalytics t _) -> pure t
-    _ -> time
-
-listSessionsForResource 
-  :: forall a. 
-    ( Typeable a
-    , Hashable (Context a), Pathable (Context a)
-    , Hashable (Name a), Pathable (Name a)
-    ) => Context a -> Name a -> IO [SessionId]
-listSessionsForResource ctx nm = 
-  streamNub . fmap getSessionId <$> Sorcerer.events (ResourceAnalyticsStream ctx nm)
-  where 
-    getSessionId (ResourceAnalyticsEvent _ sid) = sid
-
-session :: SessionId -> IO (Maybe Session)
-session = Sorcerer.read . SessionStream
-
-sessions :: [SessionId] -> IO [Session]
-sessions = fmap catMaybes . traverse session
-
-namespaceSessions
-  :: forall a. 
-    ( Typeable a
-    , Hashable (Context a), Pathable (Context a)
-    , Hashable (Name a), Pathable (Name a)
-    ) => IO [Session]
-namespaceSessions = 
-  listSessionsForNamespace @a >>= sessions
-
-contextSessions
-  :: forall a. 
-    ( Typeable a
-    , Hashable (Context a), Pathable (Context a)
-    , Hashable (Name a), Pathable (Name a)
-    ) => Context a -> IO [Session]
-contextSessions ctx = 
-  listSessionsForContext ctx >>= sessions
-
-resourceSessions 
-  :: forall a. 
-    ( Typeable a
-    , Hashable (Context a), Pathable (Context a)
-    , Hashable (Name a), Pathable (Name a)
-    ) => Context a -> Name a -> IO [Session]
-resourceSessions ctx nm = 
-  listSessionsForResource ctx nm >>= sessions
+bloomNub :: ToTxt a => [a] -> IO [a]
+bloomNub = bloomNubOn id 
 
 --------------------------------------------------------------------------------
 -- Naming:
@@ -633,42 +694,6 @@ instance Typeable a => Request (ListRecentForContext a) where
 listRecentForContext :: Proxy (ListRecentForContext a)
 listRecentForContext = Proxy
 
-data ListRelatedTopForNamespace a
-instance Identify (ListRelatedTopForNamespace a)
-instance Typeable a => Request (ListRelatedTopForNamespace a) where
-  type Req (ListRelatedTopForNamespace a) = (Int,())
-  type Rsp (ListRelatedTopForNamespace a) = [Txt]
-
-listRelatedTopForNamespace :: Proxy (ListRelatedTopForNamespace a)
-listRelatedTopForNamespace = Proxy
-
-data ListRelatedPopularForNamespace a
-instance Identify (ListRelatedPopularForNamespace a)
-instance Typeable a => Request (ListRelatedPopularForNamespace a) where
-  type Req (ListRelatedPopularForNamespace a) = (Int,())
-  type Rsp (ListRelatedPopularForNamespace a) = [Txt]
-
-listRelatedPopularForNamespace :: Proxy (ListRelatedPopularForNamespace a)
-listRelatedPopularForNamespace = Proxy
-
-data ListRelatedTopForContext a
-instance Identify (ListRelatedTopForContext a) where
-instance Typeable a => Request (ListRelatedTopForContext a) where
-  type Req (ListRelatedTopForContext a) = (Int,Context a)
-  type Rsp (ListRelatedTopForContext a) = [Txt]
-
-listRelatedTopForContext :: Proxy (ListRelatedTopForContext a)
-listRelatedTopForContext = Proxy
-
-data ListRelatedPopularForContext a
-instance Identify (ListRelatedPopularForContext a) where
-instance Typeable a => Request (ListRelatedPopularForContext a) where
-  type Req (ListRelatedPopularForContext a) = (Int,Context a)
-  type Rsp (ListRelatedPopularForContext a) = [Txt]
-
-listRelatedPopularForContext :: Proxy (ListRelatedPopularForContext a)
-listRelatedPopularForContext = Proxy
-
 data ListRelatedTopForResource a
 instance Identify (ListRelatedTopForResource a)
 instance Typeable a => Request (ListRelatedTopForResource a) where
@@ -694,10 +719,6 @@ type AnalyticsAPI a =
    , ListPopularForContext a
    , ListTopForContext a
    , ListRecentForContext a
-   , ListRelatedPopularForNamespace a
-   , ListRelatedTopForNamespace a
-   , ListRelatedPopularForContext a
-   , ListRelatedTopForContext a
    , ListRelatedPopularForResource a
    , ListRelatedTopForResource a
    ]
@@ -715,10 +736,6 @@ analyticsAPI = api msgs reqs
        <:> listPopularForContext @a
        <:> listTopForContext @a
        <:> listRecentForContext @a
-       <:> listRelatedPopularForNamespace @a
-       <:> listRelatedTopForNamespace @a
-       <:> listRelatedPopularForContext @a
-       <:> listRelatedTopForContext @a
        <:> listRelatedPopularForResource @a
        <:> listRelatedTopForResource @a
        <:> WS.none
@@ -741,471 +758,7 @@ rank positive total
       (x - y) / (1 + z2 / total)
 
 --------------------------------------------------------------------------------
--- TODO: Rewrite. This naive approach will not scale well.
--- An online algorithm would be much better, even if it is persisted.
-
-buildPopularForNamespace 
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a), ToJSON (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a), ToJSON (Name a)
-    ) => IO [(Context a,Name a)]
-buildPopularForNamespace = do
-  Milliseconds (fromIntegral -> now) _ <- time
-  c <- fromIntegral <$> analyticsCountForNamespace @a
-  ctxnms <- listUnique @a
-  counts <- Map.toList <$> foldM withContextAndName Map.empty ctxnms
-  let 
-    ranked = fmap (fmap (\(b,t,v) -> let (!newt,!newv) = upd (t,v) (now,1) in rank newv c)) counts
-    sorted = List.sortBy (flip compare `on` snd) ranked
-    result = fmap fst sorted
-  pure result
-  where
-    Milliseconds (fromIntegral -> d) _ = Day 
-
-    upd (oldt,oldv) (newt,newv) = 
-      let v = oldv * 2 ** ((oldt - newt) / d) + newv
-      in (newt,v)
-
-    withContextAndName acc (ctx,nm) = do
-      n <- analyticsCountForResource ctx nm
-      ss <- listSessionsForResource ctx nm >>= sessions
-      foldM (withSession n) acc ss
-      where
-        withSession n acc Session {..} = 
-          foldM withEvent acc events
-          where
-            withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = do
-              mctxnm <- route (readRoute (,)) evt
-              case mctxnm of
-                Just (ctx',nm') | ctx == ctx', nm == nm' ->
-                  case Map.lookup (ctx,nm) acc of
-                    Nothing -> do
-                      b <- new 0.01 n
-                      Bloom.add b ip
-                      pure $ Map.insert (ctx,nm) (b,t,1) acc
-                    Just (b,oldt,oldv) -> do
-                      updated <- Bloom.update b ip
-                      if updated then 
-                        let (!newt,!newv) = upd (oldt,oldv) (t,1)
-                        in pure $ Map.insert (ctx,nm) (b,newt,newv) acc
-                      else
-                        pure acc
-                _ -> 
-                  pure acc
-
-buildTopForNamespace 
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => IO [(Context a,Name a)]
-buildTopForNamespace = do
-  c <- fromIntegral <$> analyticsCountForNamespace @a
-  ctxnms <- listUnique @a
-  counts <- Map.toList <$> foldM withContextAndName Map.empty ctxnms
-  let 
-    ranked = fmap (fmap (\(b,v) -> rank v c)) counts
-    sorted = List.sortBy (flip compare `on` snd) ranked
-    result = fmap fst sorted
-  pure result
-  where
-    Milliseconds (fromIntegral -> d) _ = Day 
-
-    withContextAndName acc (ctx,nm) = do
-      n <- analyticsCountForResource ctx nm
-      ss <- listSessionsForResource ctx nm >>= sessions
-      foldM (withSession n) acc ss
-      where
-        withSession n acc Session {..} =
-          foldM withEvent acc events
-          where
-            withEvent acc (_,evt) = do
-              mctxnm <- route (readRoute (,)) evt
-              case mctxnm of
-                Just (ctx',nm') | ctx == ctx', nm == nm' ->
-                  case Map.lookup (ctx,nm) acc of
-                    Nothing -> do
-                      b <- new 0.01 n
-                      Bloom.add b ip
-                      pure $! Map.insert (ctx,nm) (b,1) acc
-                    Just (b,v) -> do
-                      updated <- Bloom.update b ip
-                      if updated then 
-                        pure $! Map.insert (ctx,nm) (b,v + 1) acc
-                      else
-                        pure acc
-                _ ->
-                  pure acc
-
-buildRecentForNamespace 
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => IO [(Context a,Name a)]
-buildRecentForNamespace = do
-  ctxs <- listUniqueContexts @a
-  ages <- Map.toList <$> foldM withContext Map.empty ctxs
-  let
-    sorted = List.sortBy (flip compare `on` snd) ages
-    result = fmap fst sorted
-  pure result
-  where
-    withContext acc ctx = do
-      nms <- listUniqueResources ctx
-      foldM withResource acc nms
-      where
-        withResource acc nm = do
-          t <- oldestSessionForResource ctx nm
-          pure (Map.insert (ctx,nm) t acc)
-
-buildPopularForContext 
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> IO [(Context a,Name a)]
-buildPopularForContext ctx = do
-  Milliseconds (fromIntegral -> now) _ <- time
-  c <- fromIntegral <$> analyticsCountForNamespace @a
-  nms <- listUniqueResources ctx
-  counts <- Map.toList <$> foldM withResource Map.empty nms
-  let 
-    ranked = fmap (fmap (\(b,t,v) -> let (newt,newv) = upd (t,v) (now,1) in rank newv c)) counts
-    sorted = List.sortBy (flip compare `on` snd) ranked
-    result = fmap fst sorted
-  pure result
-  where
-    Milliseconds (fromIntegral -> d) _ = Day 
-
-    upd (oldt,oldv) (newt,newv) = 
-      let !v = oldv * 2 ** ((oldt - newt) / d) + newv
-      in (newt,v)
-
-    withResource acc nm = do
-      n <- analyticsCountForResource ctx nm
-      ss <- listSessionsForResource ctx nm >>= sessions
-      foldM (withSession n) acc ss
-      where
-        withSession n acc Session {..} =
-          foldM withEvent acc events
-          where
-            withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = do
-              mctxnm <- route (readRoute (,)) evt
-              case mctxnm of
-                Just (ctx',nm') | ctx == ctx', nm == nm' ->
-                  case Map.lookup (ctx,nm) acc of
-                    Nothing -> do
-                      b <- new 0.01 n
-                      Bloom.add b ip
-                      pure $! Map.insert (ctx,nm) (b,t,1) acc
-                    Just (b,oldt,oldv) -> do
-                      updated <- Bloom.update b ip
-                      if updated then 
-                        let (newt,newv) = upd (oldt,oldv) (t,1)
-                        in pure $! Map.insert (ctx,nm) (b,newt,newv) acc
-                      else
-                        pure acc
-                _ ->
-                  pure acc
-
-buildTopForContext 
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> IO [(Context a,Name a)]
-buildTopForContext ctx = do
-  c <- fromIntegral <$> analyticsCountForNamespace @a
-  nms <- listUniqueResources ctx
-  counts <- Map.toList <$> foldM withResource Map.empty nms
-  let 
-    ranked = fmap (fmap (\(b,v) -> rank v c)) counts
-    sorted = List.sortBy (flip compare `on` snd) ranked
-    result = fmap fst sorted
-  pure result
-  where
-    withResource acc nm = do
-      n <- analyticsCountForResource ctx nm
-      ss <- listSessionsForResource ctx nm >>= sessions
-      foldM (withSession n) acc ss
-      where
-        withSession n acc Session {..} = 
-          foldM withEvent acc events
-          where
-            withEvent acc (_,evt) = do
-              mctxnm <- route (readRoute (,)) evt
-              case mctxnm of
-                Just (ctx',nm') | ctx == ctx', nm == nm' ->
-                  case Map.lookup (ctx,nm) acc of
-                    Nothing -> do
-                      b <- new 0.01 n
-                      Bloom.add b ip
-                      pure $! Map.insert (ctx,nm) (b,1) acc
-                    Just (b,oldv) -> do
-                      updated <- Bloom.update b ip
-                      if updated then 
-                        pure $! Map.insert (ctx,nm) (b,oldv + 1) acc
-                      else
-                        pure acc
-                _ ->
-                  pure acc
-
-buildRecentForContext
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> IO [(Context a,Name a)]
-buildRecentForContext ctx = do
-  nms <- listUniqueResources ctx
-  ages <- Map.toList <$> foldM withResource Map.empty nms
-  let
-    sorted = List.sortBy (flip compare `on` snd) ages
-    result = fmap fst sorted
-  pure result
-  where
-    withResource acc nm = do
-      t <- oldestSessionForResource ctx nm
-      pure (Map.insert (ctx,nm) t acc)
-
--- Consider weighting distance from target in session.
-buildRelatedPopularForNamespace
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => IO [Txt]
-buildRelatedPopularForNamespace = do
-  Milliseconds (fromIntegral -> now) _ <- time
-  c <- analyticsCountForNamespace @a
-  ss <- listSessionsForNamespace @a >>= sessions
-  counts <- Map.toList <$> foldM (withSession c) Map.empty ss
-  let 
-    ranked = fmap (fmap (\(b,t,v) -> let (newt,newv) = upd (t,v) (now,1) in rank newv (fromIntegral c))) counts
-    sorted = List.sortBy (flip compare `on` snd) ranked
-    result = fmap fst sorted
-  pure result
-  where
-    Milliseconds (fromIntegral -> d) _ = Day 
-
-    upd (oldt,oldv) (newt,newv) = 
-      let !v = oldv * 2 ** ((oldt - newt) / d) + newv
-      in (newt,v)
-
-    withSession c acc Session {..} =
-      foldM withEvent acc events
-      where
-        withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = 
-          case Map.lookup evt acc of
-            Nothing -> do
-              b <- new 0.01 c
-              Bloom.add b ip
-              pure $! Map.insert evt (b,t,1) acc
-            Just (b,oldt,oldv) -> do
-              updated <- Bloom.update b ip
-              if updated then
-                let (newt,newv) = upd (oldt,oldv) (t,1)
-                in pure $! Map.insert evt (b,newt,newv) acc
-              else
-                pure acc
-
--- Consider weighting distance from target in session.
-buildRelatedTopForNamespace 
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => IO [Txt]
-buildRelatedTopForNamespace = do
-  c <- analyticsCountForNamespace @a
-  ss <- listSessionsForNamespace @a >>= sessions
-  counts <- Map.toList <$> foldM (withSession c) Map.empty ss
-  let 
-    ranked = fmap (fmap (\(b,v) -> rank (fromIntegral v) (fromIntegral c))) counts
-    sorted = List.sortBy (flip compare `on` snd) ranked
-    result = fmap fst sorted
-  pure result
-  where
-    withSession c acc Session {..} =
-      foldM withEvent acc events
-      where
-        withEvent acc (_,evt) = 
-          case Map.lookup evt acc of
-            Nothing -> do
-              b <- new 0.01 c
-              Bloom.add b ip
-              pure $! Map.insert evt (b,1) acc
-            Just (b,oldv) -> do
-              updated <- Bloom.update b ip
-              if updated then
-                pure $! Map.insert evt (b,oldv + 1) acc
-              else
-                pure acc
-
--- Consider weighting distance from target in session.
-buildRelatedPopularForContext 
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> IO [Txt]
-buildRelatedPopularForContext ctx = do
-  Milliseconds (fromIntegral -> now) _ <- time
-  c <- analyticsCountForNamespace @a
-  ss <- listSessionsForContext ctx >>= sessions
-  counts <- Map.toList <$> foldM (withSession c) Map.empty ss
-  let 
-    ranked = fmap (fmap (\(b,t,v) -> let (newt,newv) = upd (t,v) (now,1) in rank newv (fromIntegral c))) counts
-    sorted = List.sortBy (flip compare `on` snd) ranked
-    result = fmap fst sorted
-  pure result
-  where
-    Milliseconds (fromIntegral -> d) _ = Day 
-
-    upd (oldt,oldv) (newt,newv) = 
-      let !v = oldv * 2 ** ((oldt - newt) / d) + newv
-      in (newt,v)
-
-    withSession c acc Session {..} =
-      foldM withEvent acc events
-      where
-        withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = 
-          case Map.lookup evt acc of
-            Nothing -> do
-              b <- new 0.01 c
-              Bloom.add b ip
-              pure $! Map.insert evt (b,t,1) acc
-            Just (b,oldt,oldv) -> do
-              updated <- Bloom.update b ip
-              if updated then
-                let (newt,newv) = upd (oldt,oldv) (t,1)
-                in pure $! Map.insert evt (b,newt,newv) acc
-              else
-                pure acc
-
--- Consider weighting distance from target in session.
-buildRelatedTopForContext 
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> IO [Txt]
-buildRelatedTopForContext ctx = do
-  c <- analyticsCountForNamespace @a
-  ss <- listSessionsForContext ctx >>= sessions
-  counts <- Map.toList <$> foldM (withSession c) Map.empty ss
-  let 
-    ranked = fmap (fmap (\(b,v) -> rank (fromIntegral v) (fromIntegral c))) counts
-    sorted = List.sortBy (flip compare `on` snd) ranked
-    result = fmap fst sorted
-  pure result
-  where
-    withSession c acc Session {..} =
-      foldM withEvent acc events
-      where
-        withEvent acc (_,evt) = 
-          case Map.lookup evt acc of
-            Nothing -> do
-              b <- new 0.01 c
-              Bloom.add b ip
-              pure $! Map.insert evt (b,1) acc
-            Just (b,oldv) -> do
-              updated <- Bloom.update b ip
-              if updated then
-                pure $! Map.insert evt (b,oldv + 1) acc
-              else
-                pure acc
-
--- Consider weighting distance from target in session.
-buildRelatedPopularForResource 
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> Name a -> IO [Txt]
-buildRelatedPopularForResource ctx nm = do
-  Milliseconds (fromIntegral -> now) _ <- time
-  c <- analyticsCountForNamespace @a
-  ss <- listSessionsForResource ctx nm >>= sessions
-  counts <- Map.toList <$> foldM (withSession c) Map.empty ss
-  let 
-    ranked = fmap (fmap (\(b,t,v) -> let (newt,newv) = upd (t,v) (now,1) in rank newv (fromIntegral c))) counts
-    sorted = List.sortBy (flip compare `on` snd) ranked
-    result = fmap fst sorted
-  pure result
-  where
-    Milliseconds (fromIntegral -> d) _ = Day 
-
-    upd (oldt,oldv) (newt,newv) = 
-      let !v = oldv * 2 ** ((oldt - newt) / d) + newv
-      in (newt,v)
-
-    withSession c acc Session {..} =
-      foldM withEvent acc events
-      where
-        withEvent acc (Milliseconds (fromIntegral -> t) _,evt) = 
-          case Map.lookup evt acc of
-            Nothing -> do
-              b <- new 0.01 c
-              Bloom.add b ip
-              pure $! Map.insert evt (b,t,1) acc
-            Just (b,oldt,oldv) -> do
-              updated <- Bloom.update b ip
-              if updated then
-                let (newt,newv) = upd (oldt,oldv) (t,1)
-                in pure $! Map.insert evt (b,newt,newv) acc
-              else
-                pure acc
-
--- Consider weighting distance from target in session.
-buildRelatedTopForResource 
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> Name a -> IO [Txt]
-buildRelatedTopForResource ctx nm = do
-  c <- analyticsCountForNamespace @a
-  ss <- listSessionsForResource ctx nm >>= sessions
-  counts <- Map.toList <$> foldM (withSession c) Map.empty ss
-  let 
-    ranked = fmap (fmap (\(b,v) -> rank (fromIntegral v) (fromIntegral c))) counts
-    sorted = List.sortBy (flip compare `on` snd) ranked
-    result = fmap fst sorted
-  pure result
-  where
-    withSession c acc Session {..} =
-      foldM withEvent acc events
-      where
-        withEvent acc (_,evt) = 
-          case Map.lookup evt acc of
-            Nothing -> do
-              b <- new 0.01 c
-              Bloom.add b ip
-              pure $! Map.insert evt (b,1) acc
-            Just (b,oldv) -> do
-              updated <- Bloom.update b ip
-              if updated then
-                pure $! Map.insert evt (b,oldv + 1) acc
-              else
-                pure acc
-
---------------------------------------------------------------------------------
-
+--
 data AnalyticsCache = AnalyticsCache
   { popularForNamespace        :: IORef (Map TypeRep ByteString)
   , topForNamespace            :: IORef (Map TypeRep ByteString)
@@ -1213,10 +766,6 @@ data AnalyticsCache = AnalyticsCache
   , popularForContext          :: IORef (Map TypeRep (Map Any ByteString))
   , topForContext              :: IORef (Map TypeRep (Map Any ByteString))
   , recentForContext           :: IORef (Map TypeRep (Map Any ByteString))
-  , relatedPopularForNamespace :: IORef (Map TypeRep ByteString)
-  , relatedTopForNamespace     :: IORef (Map TypeRep ByteString)
-  , relatedPopularForContext   :: IORef (Map TypeRep (Map Any ByteString))
-  , relatedTopForContext       :: IORef (Map TypeRep (Map Any ByteString))
   , relatedPopularForResource  :: IORef (Map TypeRep (Map Any ByteString))
   , relatedTopForResource      :: IORef (Map TypeRep (Map Any ByteString))
   }
@@ -1226,10 +775,6 @@ analyticsCache :: AnalyticsCache
 analyticsCache = unsafePerformIO do
   AnalyticsCache
     <$> newIORef Map.empty 
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
-    <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
     <*> newIORef Map.empty
@@ -1316,58 +861,6 @@ addRecentForContextToCache ctx rfc = do
       Nothing  -> (Map.insert ty (unsafeCoerce $ Map.singleton ctx (encodeBS rfc)) old,())
       Just tym -> (Map.insert ty (unsafeCoerce $ Map.insert ctx (encodeBS rfc) (unsafeCoerce tym)) old,())
 
-addRelatedPopularForNamespaceToCache
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => [Txt] -> IO ()
-addRelatedPopularForNamespaceToCache rpfn = do
-  let ty = typeOf (undefined :: a)
-  atomicModifyIORef' (relatedPopularForNamespace analyticsCache) $ \map ->
-    (Map.insert ty (encodeBS rpfn) map,())
-    
-addRelatedTopForNamespaceToCache
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => [Txt] -> IO ()
-addRelatedTopForNamespaceToCache rtfn = do
-  let ty = typeOf (undefined :: a)
-  atomicModifyIORef' (relatedTopForNamespace analyticsCache) $ \map ->
-    (Map.insert ty (encodeBS rtfn) map,())
-     
-addRelatedPopularForContextToCache
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> [Txt] -> IO ()
-addRelatedPopularForContextToCache ctx rpfc = do
-  let ty = typeOf (undefined :: a)
-  atomicModifyIORef' (relatedPopularForContext analyticsCache) $ \old ->
-    case Map.lookup ty old of
-      Nothing  -> (Map.insert ty (unsafeCoerce $ Map.singleton ctx (encodeBS rpfc)) old,())
-      Just tym -> (Map.insert ty (unsafeCoerce $ Map.insert ctx (encodeBS rpfc) (unsafeCoerce tym)) old,())
-
-addRelatedTopForContextToCache
-  :: forall a. 
-    ( Typeable a
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a)
-    ) => Context a -> [Txt] -> IO ()
-addRelatedTopForContextToCache ctx rtfc = do
-  let ty = typeOf (undefined :: a)
-  atomicModifyIORef' (relatedTopForContext analyticsCache) $ \old ->
-    case Map.lookup ty old of
-      Nothing  -> (Map.insert ty (unsafeCoerce $ Map.singleton ctx (encodeBS rtfc)) old,())
-      Just tym -> (Map.insert ty (unsafeCoerce $ Map.insert ctx (encodeBS rtfc) (unsafeCoerce tym)) old,())
-   
 addRelatedPopularForResourceToCache
   :: forall a. 
     ( Typeable a
@@ -1450,48 +943,6 @@ readRecentForContextFromCache ctx = do
     map <- Map.lookup ty rfc
     Map.lookup ctx (unsafeCoerce map)
 
-readRelatedPopularForNamespaceFromCache
-  :: forall a.
-    ( Typeable a
-    ) => IO (Maybe ByteString)
-readRelatedPopularForNamespaceFromCache = do
-  let ty = typeOf (undefined :: a)
-  rpfn <- readIORef (relatedPopularForNamespace analyticsCache)
-  pure (Map.lookup ty rpfn)
-  
-readRelatedTopForNamespaceFromCache
-  :: forall a.
-    ( Typeable a
-    ) => IO (Maybe ByteString)
-readRelatedTopForNamespaceFromCache = do
-  let ty = typeOf (undefined :: a)
-  rtfn <- readIORef (relatedPopularForNamespace analyticsCache)
-  pure (Map.lookup ty rtfn)
-
-readRelatedPopularForContextFromCache 
-  :: forall a. 
-    ( Typeable a 
-    , Ord (Context a)
-    ) => Context a -> IO (Maybe ByteString)
-readRelatedPopularForContextFromCache ctx = do
-  let ty = typeOf (undefined :: a)
-  rpfc <- readIORef (relatedPopularForContext analyticsCache)
-  pure do
-    map <- Map.lookup ty rpfc
-    Map.lookup ctx (unsafeCoerce map)
-
-readRelatedTopForContextFromCache 
-  :: forall a. 
-    ( Typeable a 
-    , Ord (Context a)
-    ) => Context a -> IO (Maybe ByteString)
-readRelatedTopForContextFromCache ctx = do
-  let ty = typeOf (undefined :: a)
-  rtfc <- readIORef (relatedTopForContext analyticsCache)
-  pure do
-    map <- Map.lookup ty rtfc
-    Map.lookup ctx (unsafeCoerce map)
-
 readRelatedPopularForResourceFromCache 
   :: forall a. 
     ( Typeable a 
@@ -1534,10 +985,6 @@ analytics ps = Endpoints analyticsAPI msgs reqs
        <:> handleListPopularForContext ps
        <:> handleListTopForContext ps
        <:> handleListRecentForContext ps
-       <:> handleListRelatedPopularForNamespace ps
-       <:> handleListRelatedTopForNamespace ps
-       <:> handleListRelatedPopularForContext ps
-       <:> handleListRelatedTopForContext ps
        <:> handleListRelatedPopularForResource ps
        <:> handleListRelatedTopForResource ps
        <:> WS.none
@@ -1638,66 +1085,6 @@ handleListRecentForContext Permissions {..} = responding do
   else
     reply []
 
-handleListRelatedPopularForNamespace 
-  :: forall a. 
-    ( Typeable a 
-    ) => Permissions a -> RequestHandler (ListRelatedPopularForNamespace a)
-handleListRelatedPopularForNamespace Permissions {..} = responding do
-  can <- liftIO canEnum 
-  if can then do
-    response <- liftIO (readRelatedPopularForNamespaceFromCache @a)
-    case response of
-      Just rsp -> customReplyRaw rsp
-      Nothing  -> reply []
-  else
-    reply []
-
-handleListRelatedTopForNamespace 
-  :: forall a. 
-    ( Typeable a 
-    ) => Permissions a -> RequestHandler (ListRelatedTopForNamespace a)
-handleListRelatedTopForNamespace Permissions {..} = responding do
-  can <- liftIO canEnum 
-  if can then do
-    response <- liftIO (readRelatedTopForNamespaceFromCache @a)
-    case response of
-      Just rsp -> customReplyRaw rsp
-      Nothing  -> reply []
-  else
-    reply []
-
-handleListRelatedPopularForContext 
-  :: forall a. 
-    ( Typeable a
-    , FromJSON (Context a), Ord (Context a)
-    ) => Permissions a -> RequestHandler (ListRelatedPopularForContext a)
-handleListRelatedPopularForContext Permissions {..} = responding do
-  ctx <- acquire
-  can <- liftIO (canList ctx) 
-  if can then do
-    response <- liftIO (readRelatedPopularForContextFromCache ctx)
-    case response of
-      Just rsp -> customReplyRaw rsp
-      Nothing  -> reply []
-  else
-    reply []
-
-handleListRelatedTopForContext 
-  :: forall a. 
-    ( Typeable a
-    , FromJSON (Context a), Ord (Context a)
-    ) => Permissions a -> RequestHandler (ListRelatedTopForContext a)
-handleListRelatedTopForContext Permissions {..} = responding do
-  ctx <- acquire
-  can <- liftIO (canList ctx) 
-  if can then do
-    response <- liftIO (readRelatedTopForContextFromCache ctx)
-    case response of
-      Just rsp -> customReplyRaw rsp
-      Nothing  -> reply []
-  else
-    reply []
-
 handleListRelatedPopularForResource 
   :: forall a. 
     ( Typeable a
@@ -1731,33 +1118,4 @@ handleListRelatedTopForResource Permissions {..} = responding do
       Nothing  -> reply []
   else
     reply []
-
---------------------------------------------------------------------------------
-
-analyze 
-  :: forall a.
-    ( Typeable a 
-    , Routable a
-    , Hashable (Context a), Pathable (Context a), Ord (Context a), ToJSON (Context a)
-    , Hashable (Name a), Pathable (Name a), Ord (Name a), ToJSON (Name a)
-    ) => IO ()
-analyze = do
-  buildPopularForNamespace @a >>= addPopularForNamespaceToCache
-  buildTopForNamespace @a >>= addTopForNamespaceToCache
-  buildRecentForNamespace @a >>= addRecentForNamespaceToCache
-  buildRelatedPopularForNamespace @a >>= addRelatedPopularForNamespaceToCache @a
-  buildRelatedTopForNamespace @a >>= addRelatedTopForNamespaceToCache @a
-
-  ctxs <- listUniqueContexts @a
-  for_ ctxs $ \ctx -> do 
-    buildPopularForContext ctx >>= addPopularForContextToCache ctx
-    buildTopForContext ctx >>= addTopForContextToCache ctx
-    buildRecentForContext ctx >>= addRecentForContextToCache ctx
-    buildRelatedPopularForContext ctx >>= addRelatedPopularForContextToCache ctx
-    buildRelatedTopForContext ctx >>= addRelatedTopForContextToCache ctx
-
-    nms <- listUniqueResources ctx
-    for_ nms $ \nm -> do
-      buildRelatedPopularForResource ctx nm >>= addRelatedPopularForResourceToCache ctx nm
-      buildRelatedTopForResource ctx nm >>= addRelatedTopForResourceToCache ctx nm
- 
+--
