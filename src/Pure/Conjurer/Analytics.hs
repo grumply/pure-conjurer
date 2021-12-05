@@ -3,13 +3,14 @@ module Pure.Conjurer.Analytics where
 
 import Pure.Auth (Username)
 import Pure.Conjurer
-import Pure.Bloom.Scalable as Bloom
+import Pure.Bloom as Bloom
+import Pure.Bloom.Scalable as Scalable
 import Pure.Data.JSON hiding (encode,decode)
 import Pure.Data.Txt
 import Pure.Data.Time
 import Pure.Data.Marker
 import Pure.Router (route)
-import Pure.Elm.Component (HasCallStack,timed,Default(..))
+import Pure.Elm.Component (Default(..))
 import Pure.Sorcerer hiding (events)
 import Pure.Sorcerer.Manager (Manageable(..))
 import qualified Pure.Sorcerer as Sorcerer
@@ -183,7 +184,9 @@ data GlobalAnalytics = GlobalAnalytics {-# UNPACK #-}!Int {-# UNPACK #-}!Int
   deriving anyclass (ToJSON,FromJSON)
 
 data GlobalAnalyticsMsg
-  = GlobalAnalyticsEvent Time SessionId IP Txt
+  = GlobalSessionStarted Time SessionId IP
+  | GlobalSessionEnded Time SessionId
+  | GlobalAnalyticsEvent Time SessionId IP Txt
   | GlobalResourceCreated Time SessionId Txt
   deriving stock Generic
   deriving anyclass (ToJSON,FromJSON)
@@ -208,6 +211,7 @@ instance Aggregable GlobalAnalyticsMsg GlobalAnalytics where
   update (GlobalResourceCreated _ _ _) = Sorcerer.Update . \case
     Just (GlobalAnalytics n m) -> GlobalAnalytics n (m + 1)
     Nothing                    -> GlobalAnalytics 0 1
+  update _ = \_ -> Ignore
 
   aggregate = "analytics.aggregate"
 
@@ -238,11 +242,10 @@ pattern Analysis
 pattern Analysis { created, latest, decaying, count, associations } = 
   (created,latest,decaying,count,associations)
 
-
 data Analyzer = Analyzer
-  { analyses :: Analyses
-  , hits     :: Bloom -- IP/resource pairs
-  , sessions :: Bloom
+  { analyses :: !Analyses
+  , sessions :: !(Map SessionId Txt)
+  , hits     :: Bloom.Bloom -- IP/resource pairs
   }
 
 -- Finalize corrects for staleness. This must be run for accurate results!
@@ -269,149 +272,80 @@ finalize decay@(Milliseconds d _) now@(Milliseconds n _) Analyzer { analyses, ..
       in 
         (latest,decaying',count + 1)
 
-analyzeAll :: HasCallStack => Time -> IO Analyses
-analyzeAll _decay@(Milliseconds (fromIntegral -> d) _) = timed do 
+analyzeAll :: Time -> IO Analyses
+analyzeAll _decay@(Milliseconds (fromIntegral -> d) _) = do 
 
-  -- c is a critical value. Ranking is performed by
-  -- taking the lower bound of a beta distribution 
-  -- constructed from the count of hits or the decayed
-  -- count of hits and the total count of events minus
-  -- the count of hits.
-  c <- eventsCount
-
-  start <- 
-    Analyzer
-      <$> pure Map.empty
-      <*> Bloom.new 0.001 c
-      <*> (Bloom.new 0.001 =<< sessionsCount)
+  start <- Analyzer Map.empty Map.empty <$> (Bloom.new 0.001 =<< eventsCount)
 
   evs <- Sorcerer.events GlobalAnalyticsStream
   
   analyzer <- foldM analyzeGlobalStream start evs
   now <- time
-  pure (analyses (finalize _decay now analyzer))
+  let as = analyses (finalize _decay now analyzer)
+  pure as
 
   where
     analyzeGlobalStream Analyzer {..} = \case
 
-      GlobalResourceCreated t _ r -> do
-        let
-          add = \case
-            Nothing -> 
-              Analysis
-                { created      = t
-                , latest       = t
-                , decaying     = 1
-                , count        = 1
-                , associations = Map.empty
-                }
-
-            -- Confusingly, analyzeSessionStream may add a 
-            -- resource before analyzeGlobalStream does.
-            -- So, we need to correct the time; this could 
-            -- make the decaying value slightly incorrect
-            -- but it shouldn't be too far off.
-            Just Analysis {..} -> 
-              Analysis 
-                { created = t
-                , .. 
-                }
-
+      GlobalSessionEnded _ sid ->
         pure Analyzer
-          { analyses = Map.alter (Just . add) r analyses 
+          { sessions = Map.delete sid sessions
           , ..
           }
 
-      GlobalAnalyticsEvent t sid ip hit -> do
+      GlobalResourceCreated t sid hit -> do
+        pure Analyzer
+          { analyses = flip (Map.insert hit) analyses Analysis
+            { created      = t
+            , latest       = t
+            , decaying     = 0
+            , count        = 0
+            , associations = Map.empty
+            }
+          , ..
+          }
 
-        let
-          create Nothing = 
-            Analysis
-              { created      = t
-              , latest       = t
-              , decaying     = 1
-              , count        = 1
-              , associations = Map.empty
-              }
+      GlobalAnalyticsEvent t@(Milliseconds n _) sid ip hit -> do
+        firstVisit <- Bloom.update hits (toTxt ip <> hit)
+        if firstVisit then do
+          
+          let 
+            -- record a link from the previous hit to the new hit for this session
+            addLink Analysis {..} = Analysis { associations = Map.alter (Just . upd) hit associations, .. }
+              where
+                upd = \case
+                  Nothing -> (t,1,1)
+                  Just (Milliseconds l _,decaying,count) -> 
+                    let 
+                      -- the `+ 1` is a good extension point for enrichment
+                      decaying' = decaying * 2 ** (fromIntegral (l - n) / fromIntegral d) + 1 
+                    in 
+                      (t,decaying',count + 1)
 
-          create (Just Analysis {..}) = 
-            let 
-              Milliseconds c _ = created
-              Milliseconds n _ = t
-            in 
-              Analysis 
-                { decaying = decaying * 2 ** (fromIntegral (c - n) / fromIntegral d) + 1
-                , count    = count + 1
-                , .. 
-                }
+            -- record the new hit
+            addHit Analysis {..} = 
+              let Milliseconds c _ = created
+              in Analysis 
+                  { decaying = decaying * 2 ** (fromIntegral (c - n) / fromIntegral d) + 1
+                  , count    = count + 1
+                  , .. 
+                  }
 
-          new = 
-            Analyzer 
-              { analyses = Map.alter (Just . create) hit analyses 
-              , ..
-              }
-              
-        newVisit <- Bloom.update hits (toTxt ip <> hit) 
-        if newVisit then do
-
-          newSession <- Bloom.update sessions sid
-          if newSession then do
-
-            evs <- Sorcerer.events (SessionStream sid)
-            snd <$> foldM analyzeSessionStream (Nothing,new) evs
-
-          else
-
-            pure new
+          pure Analyzer
+            { analyses = Map.adjust addHit hit (maybe id (Map.adjust addLink) (Map.lookup sid sessions) analyses)
+            , sessions = Map.insert sid hit sessions
+            , ..
+            }  
 
         else
 
           pure Analyzer {..}
 
-    analyzeSessionStream (source,Analyzer {..}) = \case
+      _ ->
+        pure Analyzer {..}
 
-      SessionEvent t destination ->
-        
-        let 
-          analyses' = maybe id (Map.alter (Just . add)) source analyses 
-            where
-              add = \case
-                Nothing -> 
-                  Analysis
-                    { created      = t
-                    , latest       = t
-                    , decaying     = 1
-                    , count        = 1
-                    , associations = Map.singleton destination (t,1,1)
-                    }
-
-                Just Analysis {..} ->
-                  Analysis 
-                    { associations = Map.alter (Just . upd) destination associations
-                    , ..
-                    }
-
-              upd = \case
-                Nothing -> (t,1,1)
-
-                -- the `+ 1` is a good extension point for enrichment
-                Just (Milliseconds l _,decaying,count) -> 
-                  let 
-                    Milliseconds n _ = t
-                    decaying' = decaying * 2 ** (fromIntegral (l - n) / fromIntegral d) + 1 
-                  in 
-                    (t,decaying',count + 1)
-
-        in
-          pure (Just destination,Analyzer { analyses = analyses', .. })
-
-      _ -> 
-        pure (source,Analyzer {..})
-
---------------------------------------------------------------------------------
 -- TODO: switch to a true graph-based approach, since there are some nice
 -- algorithms for these sorts of analyses.
-
 data Analyzed a = Analyzed
   { popular                  :: [(Context a,Name a)]
   , top                      :: [(Context a,Name a)]
@@ -423,7 +357,7 @@ data Analyzed a = Analyzed
   , relatedTopByResource     :: Map (Context a,Name a) [Txt]
   }
 
-toAnalyzed :: forall a. (Rootable a, Routable a, Ord (Context a), Ord (Name a)) => Analyses -> Analyzed a
+toAnalyzed :: forall a. (Rootable a, Routable a, Ord (Context a), Ord (Name a),ToJSON (Name a),ToJSON (Context a)) => Analyses -> Analyzed a
 toAnalyzed analyses = Analyzed {..}
   where
 
@@ -443,17 +377,17 @@ toAnalyzed analyses = Analyzed {..}
 
 
     popular, top, recent :: [(Context a,Name a)]
-    popular = fmap fst (sortBy (flip compare `on` fmap target) matches)
+    popular = fmap fst (sortBy (flip compare `on` target) matches)
       where
-        target Analysis { decaying } = decaying
+        target (_,Analysis { decaying }) = decaying
 
-    top = fmap fst (sortBy (flip compare `on` fmap target) matches)
+    top = fmap fst (sortBy (flip compare `on` target) matches)
       where
-        target Analysis { count } = count
+        target (_,Analysis { count }) = count
         
-    recent = fmap fst (sortBy (flip compare `on` fmap target) matches)
+    recent = fmap fst (sortBy (flip compare `on` target) matches)
       where
-        target Analysis { created } = created
+        target (_,Analysis { created }) = created
 
 
     popularByContext, topByContext, recentByContext :: Map (Context a) [(Context a,Name a)]
@@ -473,18 +407,18 @@ toAnalyzed analyses = Analyzed {..}
     relatedPopularByResource, relatedTopByResource :: Map (Context a,Name a) [Txt]
     relatedPopularByResource = Map.fromList . fmap (fmap extract) $ matches
       where
-        extract Analysis { associations } = fmap fst . sortBy (flip compare `on` fmap target) . Map.toList $ associations
+        extract Analysis { associations } = fmap fst . sortBy (flip compare `on` target) . Map.toList $ associations
           where
-            target (_,decaying,_) = decaying
+            target (_,(_,decaying,_)) = decaying
 
     relatedTopByResource = Map.fromList . fmap (fmap extract) $ matches
       where
-        extract Analysis { associations } = fmap fst . sortBy (flip compare `on` fmap target) . Map.toList $ associations
+        extract Analysis { associations } = fmap fst . sortBy (flip compare `on` target) . Map.toList $ associations
           where
-            target (_,_,count) = count
+            target (_,(_,_,count)) = count
 
 class Analyzeable (as :: [*]) where
-  analyzeEach :: HasCallStack => Analyses -> IO ()
+  analyzeEach :: Analyses -> IO ()
 
 instance Analyzeable '[] where
   analyzeEach _ = pure ()
@@ -497,7 +431,7 @@ instance
   , Analyzeable as
   ) => Analyzeable (a : as) 
   where
-    analyzeEach analyses = timed do
+    analyzeEach analyses = do
       let Analyzed {..} = toAnalyzed @a analyses
 
       addPopularForNamespaceToCache popular
@@ -563,7 +497,7 @@ recordCreate
 recordCreate sid ctx nm = do
   now <- time
   Sorcerer.write GlobalAnalyticsStream do
-    GlobalResourceCreated now sid (toReadRoute ctx nm)
+    GlobalResourceCreated now sid (toReadRoute ctx nm) 
 
 recordEvent :: SessionId -> Txt -> IO ()
 recordEvent sid evt = do
@@ -576,6 +510,8 @@ recordEnd sid = do
   now <- time
   Sorcerer.write (SessionStream sid) do
     SessionEnd now
+  Sorcerer.write GlobalAnalyticsStream do
+    GlobalSessionEnded now sid
 
 --------------------------------------------------------------------------------  
 
@@ -588,7 +524,7 @@ addAnalytics
     , ToJSON (Name a), FromJSON (Name a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
     )  => SessionId -> IP -> Callbacks a -> Callbacks a
-addAnalytics sid ip cbs = cbs { onRead = analyzeRead }
+addAnalytics sid ip cbs = cbs { onRead = analyzeRead, onCreate = analyzeCreate }
   where
     analyzeRead ctx name product = do
       recordRead sid ip ctx name
@@ -617,12 +553,12 @@ streamNub = streamNubOn id
 
 bloomNubOn :: ToTxt x => (a -> x) -> [a] -> IO [a]
 bloomNubOn f xs = unsafeInterleaveIO do
-  b <- bloom 0.001
+  b <- Scalable.bloom 0.001
   go b xs
   where
     go _ [] = pure []
     go b (a : as) =
-      Bloom.update b (f a) >>= \case
+      Scalable.update b (f a) >>= \case
         True -> (a:) <$> go b as
         _ -> go b as
 
