@@ -9,6 +9,7 @@ import Pure.Conjurer.Resource
 import Pure.Conjurer.Rootable
 import Pure.Conjurer.Routable
 
+import qualified Pure.Data.View
 import Pure.Data.JSON
 import Pure.Elm.Application (storeScrollPosition)
 import Pure.Elm.Component hiding (root)
@@ -30,7 +31,7 @@ class Listable resource where
     :: ( Typeable resource
        , Routable resource
        , Theme resource
-       , Component (Preview resource)
+       , Pure (Preview resource)
        , FromJSON (Preview resource)
        , ToJSON (Context resource), FromJSON (Context resource)
        , ToJSON (Name resource), FromJSON (Name resource)
@@ -46,7 +47,7 @@ class Listable resource where
       consumer ctx ps = 
         Ul <| Themed @resource . Themed @Listing |> 
           [ Li <| go (toReadRoute ctx nm) |> 
-            [ run p ] 
+            [ View p ] 
           | (nm,p) <- ps 
           ]
         where
@@ -59,7 +60,7 @@ cachingToList
     ( Typeable resource
     , Routable resource
     , Theme resource
-    , Component (Preview resource)
+    , Pure (Preview resource)
     , FromJSON (Preview resource)
     , ToJSON (Context resource), FromJSON (Context resource), Ord (Context resource)
     , ToJSON (Name resource), FromJSON (Name resource), Ord (Name resource)
@@ -79,7 +80,7 @@ cachingToList shouldPreloadPreviews _ ctx =
     consumer ctx ps = 
       Ul <| Themed @resource . Themed @Listing |> 
         [ Li <| go (toReadRoute ctx nm) . preload ctx nm |> 
-          [ run p ] 
+          [ View p ] 
         | (nm,p) <- ps 
         ]
       where
@@ -98,5 +99,5 @@ instance {-# INCOHERENT #-}
   , ToJSON (Name resource), FromJSON (Name resource), Pathable (Name resource), Eq (Name resource)
   , Theme resource
   , FromJSON (Preview resource)
-  , Component (Preview resource)
+  , Pure (Preview resource)
   ) => Listable resource

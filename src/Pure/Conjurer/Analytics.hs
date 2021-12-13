@@ -282,6 +282,7 @@ analyzeAll _decay@(Milliseconds (fromIntegral -> d) _) = do
   analyzer <- foldM analyzeGlobalStream start evs
   now <- time
   let as = analyses (finalize _decay now analyzer)
+  print as
   pure as
 
   where

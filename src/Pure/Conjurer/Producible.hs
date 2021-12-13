@@ -20,15 +20,16 @@ data family Product a :: *
 
 type Previewing = Bool
 class Producible a where
-  produce :: Previewing -> Context a -> Name a -> Resource a -> IO (Product a)
-  default produce :: Typeable a => Previewing -> Context a -> Name a -> Resource a -> IO (Product a)
-  produce _ _ _ _ = 
+  produce :: Previewing -> Context a -> Name a -> Resource a -> Maybe (Product a) -> IO (Product a)
+  default produce :: Typeable a => Previewing -> Context a -> Name a -> Resource a -> Maybe (Product a) -> IO (Product a)
+  produce _ _ _ _ _ = 
     let 
       tc = fromTxt (rep @a)
       err = "Producible " <> tc 
          <> " => produce :: Previewing -> Context " <> tc
          <> " -> Name " <> tc
          <> " -> Resource " <> tc 
+         <> " -> Maybe (Product " <> tc <> ")" 
          <> " -> IO (Product " <> tc <> "): Not implemented."
     in 
       pure (error err)

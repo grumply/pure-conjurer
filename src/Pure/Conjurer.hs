@@ -83,7 +83,7 @@ conjure
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => IO ()
 conjure = do
@@ -179,7 +179,7 @@ tryCreate
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> Context a -> Resource a -> IO (Maybe (Name a,Product a,Preview a,[(Name a,Preview a)]))
 tryCreate Permissions {..} Callbacks {..} ctx a0 = do
@@ -193,7 +193,7 @@ tryCreate Permissions {..} Callbacks {..} ctx a0 = do
         withLock ctx name do
           Sorcerer.observe (ResourceStream ctx name) (CreateResource a) >>= \case
             Added (new :: Resource a) -> do
-              pro <- produce False ctx name new
+              pro <- produce False ctx name new Nothing
               pre <- preview False ctx name new pro
               (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
               (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
@@ -222,7 +222,7 @@ tryUpdate
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> Context a -> Name a -> Resource a -> IO (Maybe (Product a,Preview a,[(Name a,Preview a)]))
 tryUpdate Permissions {..} Callbacks {..} ctx name a0 = do
@@ -235,7 +235,8 @@ tryUpdate Permissions {..} Callbacks {..} ctx name a0 = do
         withLock ctx name do
           Sorcerer.transact (ResourceStream ctx name) (SetResource a) >>= \case
             Sorcerer.Update (new :: Resource a) -> do
-              pro <- produce False ctx name new 
+              mpro <- Sorcerer.read (ProductStream ctx name)
+              pro <- produce False ctx name new mpro
               pre <- preview False ctx name new pro
               (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
               (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
@@ -263,7 +264,7 @@ tryAmend
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> Context a -> Name a -> Amend a -> IO (Maybe (Product a,Preview a,[(Name a,Preview a)]))
 tryAmend Permissions {..} Callbacks {..} ctx name a = do
@@ -272,7 +273,8 @@ tryAmend Permissions {..} Callbacks {..} ctx name a = do
     withLock ctx name do
       Sorcerer.transact (ResourceStream ctx name) (AmendResource a) >>= \case
         Sorcerer.Update (new :: Resource a) -> do
-          pro <- produce False ctx name new
+          mpro <- Sorcerer.read (ProductStream ctx name)
+          pro <- produce False ctx name new mpro
           pre <- preview False ctx name new pro
           (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
           (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
@@ -300,7 +302,7 @@ tryDelete
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> Context a -> Name a -> IO (Maybe (Product a,Preview a,[(Name a,Preview a)]))
 tryDelete Permissions {..} Callbacks {..} ctx name = do
@@ -395,7 +397,7 @@ tryReadListing
     ( Typeable a
     , ToJSON (Preview a), FromJSON (Preview a)
     , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , ToJSON (Name a), FromJSON (Name a), Eq (Name a)
+    , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
     ) => Permissions a -> Callbacks a -> Context a -> IO (Maybe [(Name a,Preview a)])
 tryReadListing Permissions {..} Callbacks {..} ctx = do
   can <- canList ctx
@@ -447,7 +449,7 @@ publishing ::
   , ToJSON (Context a), FromJSON (Context a)
   , ToJSON (Name a), FromJSON (Name a)
   , Pathable (Context a), Hashable (Context a), Ord (Context a)
-  , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+  , Pathable (Name a), Hashable (Name a), Ord (Name a)
   , FromJSON (Amend a), ToJSON (Amend a)
   ) => Permissions a -> Callbacks a -> Interactions a
     -> Endpoints '[] (PublishingAPI a) '[] (PublishingAPI a)
@@ -471,7 +473,7 @@ reading ::
   , ToJSON (Context a), FromJSON (Context a)
   , ToJSON (Name a), FromJSON (Name a)
   , Pathable (Context a), Hashable (Context a), Ord (Context a)
-  , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+  , Pathable (Name a), Hashable (Name a), Ord (Name a)
   ) => Permissions a -> Callbacks a 
     -> Endpoints '[] (ReadingAPI a) '[] (ReadingAPI a)
 reading ps cs = Endpoints readingAPI msgs reqs
@@ -492,7 +494,7 @@ handleCreateResource
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> RequestHandler (CreateResource a)
 handleCreateResource permissions callbacks = responding do
@@ -529,7 +531,7 @@ handleUpdateResource
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> RequestHandler (UpdateResource a)
 handleUpdateResource permissions callbacks = responding do
@@ -549,7 +551,7 @@ handleDeleteResource
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> RequestHandler (DeleteResource a)
 handleDeleteResource permissions callbacks = responding do
@@ -568,8 +570,8 @@ handlePreviewResource
     , ToJSON (Preview a), FromJSON (Preview a)
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
-    , Pathable (Context a), Hashable (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a)
+    , Pathable (Context a), Hashable (Context a), Ord (Context a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     ) => Permissions a -> Callbacks a -> RequestHandler (PreviewResource a)
 handlePreviewResource permissions callbacks = responding do
   (ctx,res0) <- acquire
@@ -584,7 +586,8 @@ handlePreviewResource permissions callbacks = responding do
         let name = toName res
         can <- canCreate permissions ctx name res
         if can then do
-          pro <- produce True ctx name res
+          mpro <- Sorcerer.read (ProductStream ctx name)
+          pro <- produce True ctx name res mpro
           pre <- preview True ctx name res pro
           pure (Just (ctx,name,pre,pro,res))
         else
@@ -601,7 +604,7 @@ handlePreviewAmendResource
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     , ToJSON (Amend a), FromJSON (Amend a)
     ) => Permissions a -> Callbacks a -> RequestHandler (PreviewAmendResource a)
 handlePreviewAmendResource permissions callbacks = responding do
@@ -615,7 +618,8 @@ handlePreviewAmendResource permissions callbacks = responding do
           case amend a resource of
             Nothing -> pure Nothing
             Just res -> do
-              pro <- produce True ctx name res
+              mpro <- Sorcerer.read (ProductStream ctx name)
+              pro <- produce True ctx name res mpro
               pre <- preview True ctx name res pro
               pure (Just (ctx,name,pre,pro,res))
         else
@@ -648,7 +652,7 @@ handleAmendResource
     , ToJSON (Context a), FromJSON (Context a)
     , ToJSON (Name a), FromJSON (Name a)
     , Pathable (Context a), Hashable (Context a), Ord (Context a)
-    , Pathable (Name a), Hashable (Name a), Eq (Name a), Ord (Name a)
+    , Pathable (Name a), Hashable (Name a), Ord (Name a)
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> RequestHandler (AmendResource a)
 handleAmendResource permissions callbacks = responding do
@@ -706,7 +710,7 @@ handleReadListing
     , ToJSON (Preview a), FromJSON (Preview a)
     , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
     , ToJSON (Name a), FromJSON (Name a)
-    , Pathable (Context a), Hashable (Context a), Eq (Name a)
+    , Pathable (Context a), Hashable (Context a), Ord (Name a)
     ) => Permissions a -> Callbacks a -> RequestHandler (ReadListing a)
 handleReadListing permissions callbacks = responding do
   ctx <- acquire
@@ -996,8 +1000,8 @@ data SomeRoute _role
     , Theme resource
     , Routable resource
     , FromJSON (Resource resource), ToJSON (Resource resource), Default (Resource resource)
-    , FromJSON (Context resource), ToJSON (Context resource), Pathable (Context resource), Eq (Context resource)
-    , FromJSON (Name resource), ToJSON (Name resource), Pathable (Name resource), Eq (Name resource)
+    , FromJSON (Context resource), ToJSON (Context resource), Pathable (Context resource), Ord (Context resource)
+    , FromJSON (Name resource), ToJSON (Name resource), Pathable (Name resource), Ord (Name resource)
     , FromJSON (Preview resource)
     , FromJSON (Product resource)
     , Formable (Resource resource)

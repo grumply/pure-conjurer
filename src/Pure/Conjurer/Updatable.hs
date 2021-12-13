@@ -10,6 +10,7 @@ import Pure.Conjurer.Resource
 import Pure.Conjurer.Rootable
 import Pure.Conjurer.Routable
 
+import qualified Pure.Data.View
 import Pure.Auth (Access(..),authorize,defaultOnRegistered)
 import Pure.Data.JSON
 import Pure.Elm.Component hiding (root,Update)
@@ -38,8 +39,8 @@ class Updatable _role resource where
        , FromJSON (Preview resource)
        , FromJSON (Product resource)
        , Formable (Resource resource)
-       , Component (Preview resource)
-       , Component (Product resource)
+       , Pure (Preview resource)
+       , Pure (Product resource)
        , Eq (Context resource)
        , Eq (Name resource)
        ) => WebSocket -> Context resource -> Name resource -> View
@@ -62,8 +63,8 @@ class Updatable _role resource where
           Nothing -> pure "Failed to preview."
           Just (ctx,nm,pre,pro,res) -> pure do
             Div <| Themed @resource . Themed @Previewing |>
-              [ run pre
-              , run pro
+              [ View pre
+              , View pro
               ]
 
       onSubmit resource = do
@@ -88,8 +89,8 @@ cachingToUpdate
     , FromJSON (Preview resource)
     , FromJSON (Product resource)
     , Formable (Resource resource)
-    , Component (Preview resource)
-    , Component (Product resource)
+    , Pure (Preview resource)
+    , Pure (Product resource)
     , Eq (Context resource)
     , Eq (Name resource)
     ) => WebSocket -> Context resource -> Name resource -> View
@@ -112,8 +113,8 @@ cachingToUpdate ws ctx nm =
         Nothing -> pure "Failed to preview."
         Just (ctx,nm,pre,pro,res) -> pure do
           Div <| Themed @resource . Themed @Previewing |>
-            [ run pre
-            , run pro
+            [ View pre
+            , View pro
             ]
 
     onSubmit resource = do

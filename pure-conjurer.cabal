@@ -20,6 +20,7 @@ library
       base
     , pure-auth
     , pure-bloom
+    , pure-core
     , pure-default
     , pure-elm
     , pure-hooks

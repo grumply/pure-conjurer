@@ -12,6 +12,7 @@ import Pure.Conjurer.Rootable
 import Pure.Conjurer.Routable
 import Pure.Conjurer.Updatable (Previewing)
 
+import qualified Pure.Data.View
 import Pure.Auth (Access(..),authorize,defaultOnRegistered)
 import Pure.Data.Default
 import Pure.Data.JSON
@@ -38,8 +39,8 @@ class Creatable _role resource where
        , FromJSON (Preview resource)
        , FromJSON (Product resource)
        , Formable (Resource resource)
-       , Component (Preview resource)
-       , Component (Product resource)
+       , Pure (Preview resource)
+       , Pure (Product resource)
        ) => WebSocket -> Context resource -> View
   toCreate ws ctx =
     authorize @_role (Access ws id defaultOnRegistered) $ \_ -> 
@@ -53,8 +54,8 @@ class Creatable _role resource where
             Nothing -> pure "Failed to preview."
             Just (ctx,nm,pre,pro,res) -> pure do
               Div <| Themed @resource . Themed @Previewing |>
-                [ run pre
-                , run pro
+                [ View pre
+                , View pro
                 ]
 
         onSubmit resource = do
@@ -78,6 +79,6 @@ instance {-# INCOHERENT #-}
   , FromJSON (Preview resource)
   , FromJSON (Product resource)
   , Formable (Resource resource)
-  , Component (Preview resource)
-  , Component (Product resource)
+  , Pure (Preview resource)
+  , Pure (Product resource)
   ) => Creatable _role resource

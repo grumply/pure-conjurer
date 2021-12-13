@@ -7,6 +7,7 @@ import Pure.Conjurer.Producible
 import Pure.Conjurer.Resource
 import Pure.Conjurer.Rootable
 
+import qualified Pure.Data.View
 import Pure.Data.JSON
 import Pure.Elm.Component hiding (root)
 import Pure.Maybe
@@ -28,7 +29,7 @@ class Readable resource where
   default toRead 
     :: ( Typeable resource
        , Theme resource
-       , Component (Product resource)
+       , Pure (Product resource)
        , FromJSON (Context resource), ToJSON (Context resource)
        , FromJSON (Name resource), ToJSON (Name resource)
        , FromJSON (Product resource)
@@ -37,7 +38,7 @@ class Readable resource where
        ) => WebSocket -> Context resource -> Name resource -> View
   toRead = 
     toReadWith $ \_ _ ->
-      maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ run x ])
+      maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ View x ])
 
 toReadWith
   :: forall resource.
@@ -78,7 +79,7 @@ cachingToRead
   :: forall resource.
     ( Typeable resource
     , Theme resource
-    , Component (Product resource)
+    , Pure (Product resource)
     , FromJSON (Context resource), ToJSON (Context resource), Ord (Context resource)
     , FromJSON (Name resource), ToJSON (Name resource), Ord (Name resource)
     , FromJSON (Product resource)
@@ -88,12 +89,12 @@ cachingToRead
   => WebSocket -> Context resource -> Name resource -> View
 cachingToRead = 
   cachingToReadWith $ \_ _ ->
-    maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ run x ])
+    maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ View x ])
 
 instance {-# INCOHERENT #-}
   ( Theme resource
   , ToJSON (Context resource), FromJSON (Context resource), Eq (Context resource)
   , ToJSON (Name resource), FromJSON (Name resource), Eq (Name resource)
   , FromJSON (Product resource)
-  , Component (Product resource)
+  , Pure (Product resource)
   ) => Readable resource
