@@ -281,12 +281,12 @@ analyzeAll _decay@(Milliseconds (fromIntegral -> d) _) = do
   
   analyzer <- foldM analyzeGlobalStream start evs
   now <- time
-  let as = analyses (finalize _decay now analyzer)
+  let !as = analyses (finalize _decay now analyzer)
   print as
   pure as
 
   where
-    analyzeGlobalStream Analyzer {..} = \case
+    analyzeGlobalStream !(Analyzer {..}) = \case
 
       GlobalSessionEnded _ sid ->
         pure Analyzer

@@ -24,6 +24,7 @@ import Pure.Conjurer.Routable as Export
 import Pure.Conjurer.Slug as Export
 import Pure.Conjurer.Updatable as Export
 
+import Pure.Data.View (Pure(..),pattern View)
 import Pure.Data.JSON (ToJSON(..),FromJSON(..),encodeBS,decodeBS)
 import Pure.Data.Render ()
 import Pure.Data.Txt as Txt
@@ -1111,13 +1112,13 @@ generateStatic
     , ToJSON (Name a), FromJSON (Name a), Hashable (Name a), Pathable (Name a), Ord (Name a)
     , ToJSON (Context a), FromJSON (Context a), Hashable (Context a), Pathable (Context a), Ord (Context a)
     , ToJSON (Product a), FromJSON (Product a)
-    , Component (Product a)
+    , Pure (Product a)
     ) => WebSocket -> IO ()
 generateStatic = generateStaticWith @a "dist/static/" defaultTemplate
 
-defaultTemplate :: (Component a) => a -> IO Txt
+defaultTemplate :: (Pure a) => a -> IO Txt
 defaultTemplate a = pure $
-  "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"></head><body>" <> toTxt (run a) <> "</body></html>"
+  "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"></head><body>" <> toTxt (View a) <> "</body></html>"
 
 generateStaticWith 
   :: forall a. 
