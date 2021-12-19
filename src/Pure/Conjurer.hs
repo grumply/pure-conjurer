@@ -1034,17 +1034,17 @@ instance Theme List
 
 pages :: forall _role a. (Creatable _role a, Listable a, Readable a, Updatable _role a) => WebSocket -> Route a -> View
 pages ws = \case
-  ReadR ctx nm   -> Div <| Themed @Conjured . Themed @Read |> [ toRead ws ctx nm ]
-  ListR ctx      -> Div <| Themed @Conjured . Themed @List |> [ Export.toList ws ctx ]
-  CreateR ctx    -> Div <| Themed @Conjured . Themed @Create |> [ toCreate @_role ws ctx ]
-  UpdateR ctx nm -> Div <| Themed @Conjured . Themed @Update |> [ toUpdate @_role ws ctx nm ]
+  ReadR ctx nm   -> toRead ws ctx nm
+  ListR ctx      -> Export.toList ws ctx
+  CreateR ctx    -> toCreate @_role ws ctx
+  UpdateR ctx nm -> toUpdate @_role ws ctx nm
 
 readPages :: (Readable a, Listable a) => WebSocket -> Route a -> View
 readPages ws = \case
-  ReadR ctx nm   -> Div <| Themed @Conjured . Themed @Read |> [ toRead ws ctx nm ]
-  UpdateR ctx nm -> Div <| Themed @Conjured . Themed @Read |> [ toRead ws ctx nm ]
-  ListR ctx      -> Div <| Themed @Conjured . Themed @List |> [ Export.toList ws ctx ]
-  CreateR ctx    -> Div <| Themed @Conjured . Themed @List |> [ Export.toList ws ctx ]
+  ReadR ctx nm   -> toRead ws ctx nm
+  UpdateR ctx nm -> toRead ws ctx nm
+  ListR ctx      -> Export.toList ws ctx
+  CreateR ctx    -> Export.toList ws ctx
 
 routes :: forall a route. (Typeable a, Routable a) 
        => (Route a -> route) -> Routing route ()

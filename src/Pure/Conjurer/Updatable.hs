@@ -139,7 +139,7 @@ instance {-# INCOHERENT #-}
   , FromJSON (Preview resource)
   , FromJSON (Product resource)
   , Formable (Resource resource)
-  , Component (Preview resource)
-  , Component (Product resource)
+  , Pure (Preview resource)
+  , Pure (Product resource)
   , Theme resource
   ) => Updatable _role resource
