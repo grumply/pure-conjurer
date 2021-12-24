@@ -58,8 +58,9 @@ toReadWith f ws ctx nm = producingKeyed (ctx,nm) producer (consuming . consumer)
     consumer (ctx,nm) = f ctx nm 
 
 cachingToReadWith
-  :: forall resource.
-    ( Typeable resource
+  :: forall _role resource.
+    ( Typeable _role
+    , Typeable resource
     , FromJSON (Context resource), ToJSON (Context resource), Ord (Context resource)
     , FromJSON (Name resource), ToJSON (Name resource), Ord (Name resource)
     , FromJSON (Product resource)
@@ -70,14 +71,15 @@ cachingToReadWith
 cachingToReadWith f _ ctx nm = producingKeyed (ctx,nm) producer (consuming . consumer)
   where
     producer =
-      req Cached (readingAPI @resource)
+      req @_role Cached (readingAPI @resource)
         (readProduct @resource) 
 
     consumer (ctx,nm) = f ctx nm
 
 cachingToRead 
-  :: forall resource.
-    ( Typeable resource
+  :: forall _role resource.
+    ( Typeable _role
+    , Typeable resource
     , Theme resource
     , Pure (Product resource)
     , FromJSON (Context resource), ToJSON (Context resource), Ord (Context resource)
@@ -88,7 +90,7 @@ cachingToRead
     ) 
   => WebSocket -> Context resource -> Name resource -> View
 cachingToRead = 
-  cachingToReadWith $ \_ _ ->
+  cachingToReadWith @_role $ \_ _ ->
     maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ View x ])
 
 instance {-# INCOHERENT #-}

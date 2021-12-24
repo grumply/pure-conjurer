@@ -30,7 +30,7 @@ import Pure.Data.Render ()
 import Pure.Data.Txt as Txt
 import Pure.Elm.Application (storeScrollPosition)
 import Pure.Elm.Component (Default,View,HasFeatures,pattern OnClickWith,intercept,pattern Href,pattern OnTouchStart,pattern OnMouseDown,Theme(..),pattern Themed,(|>),(<|),pattern Div,Component(run))
-import Pure.Router as Router (Routing,goto)
+import Pure.Router as Router (Routing,goto,catchError,getRoutingState,putRoutingState,runRouting)
 import Pure.Sorcerer as Sorcerer hiding (Read,pattern Update)
 import qualified Pure.Sorcerer as Sorcerer
 import Pure.WebSocket as WS hiding (Index,identify,rep)
@@ -737,9 +737,9 @@ data Cache = Cache
   }
 
 {-# NOINLINE conjurerCache #-}
-conjurerCache :: Cache 
+conjurerCache :: Pure.Conjurer.Cache 
 conjurerCache = unsafePerformIO do
-  Cache 
+  Pure.Conjurer.Cache 
     <$> newIORef Set.empty
     <*> newIORef Map.empty 
     <*> newIORef Map.empty
@@ -1010,6 +1010,7 @@ data SomeRoute _role
     , Updatable _role resource
     , Listable resource
     , Creatable _role resource
+    , Ownable resource
     ) => SomeRoute (Route resource)
 
 fromSomeRoute :: forall _role resource. Typeable resource => SomeRoute _role -> Maybe (Route resource)
@@ -1061,6 +1062,18 @@ location = \case
   CreateR ctx    -> toCreateRoute ctx
   UpdateR ctx nm -> toUpdateRoute ctx nm
 
+instance (Typeable resource, Routable resource) => Pathable (Route resource) where
+  toPath = location
+  fromPath = do
+    st <- getRoutingState
+    (r,st') <- runRouting (routes id) st
+    case r of
+      Left rt -> do
+        putRoutingState st'
+        pure rt
+      _ -> do
+        pure Nothing
+
 ref :: (Routable a, HasFeatures v) => Route a -> v -> v
 ref = go . location
   where
@@ -1074,8 +1087,9 @@ goto = go . location
       Router.goto r
 
 preload
-  :: forall a v.
-    ( Typeable a
+  :: forall _role a v.
+    ( Typeable _role
+    , Typeable a
     , ToJSON (Name a), FromJSON (Name a), Ord (Name a)
     , ToJSON (Context a), FromJSON (Context a), Ord (Context a)
     , FromJSON (Product a)
@@ -1087,13 +1101,13 @@ preload rt = OnMouseDown load . OnTouchStart load
     load _ = case rt of
       ReadR ctx nm -> 
         void $ forkIO $ void $ do
-          req Cached (readingAPI @a)
+          req @_role Cached (readingAPI @a)
             (readProduct @a) 
             (ctx,nm)
 
       ListR ctx ->
         void $ forkIO $ void $ do
-          req Cached (readingAPI @a)
+          req @_role Cached (readingAPI @a)
             (readListing @a) 
             ctx
         

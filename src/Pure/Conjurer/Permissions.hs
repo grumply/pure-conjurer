@@ -7,7 +7,7 @@ import Pure.Conjurer.Interactions
 import Pure.Auth (Username)
 
 class Ownable resource where
-  isOwner :: Username -> Context resource -> Name resource -> IO Bool
+  isOwner :: Username -> Context resource -> Maybe (Name resource) -> IO Bool
 
 data Permissions resource = Permissions
   { canCreate   :: Context resource -> Name resource -> Resource resource -> IO Bool
@@ -60,12 +60,12 @@ defaultPermissions :: Ownable resource => Maybe Username -> Permissions resource
 defaultPermissions = \case
   Nothing -> readPermissions
   Just un -> readPermissions
-    { canCreate   = \ctx nm _ -> isOwner un ctx nm
-    , canUpdate   = isOwner un
-    , canAmend    = \ctx nm _ -> isOwner un ctx nm
-    , canInteract = \ctx nm _ -> isOwner un ctx nm
+    { canCreate   = \ctx nm _ -> isOwner un ctx (Just nm)
+    , canUpdate   = \ctx nm   -> isOwner un ctx (Just nm)
+    , canAmend    = \ctx nm _ -> isOwner un ctx (Just nm)
+    , canInteract = \ctx nm _ -> isOwner un ctx (Just nm)
     }
-      -- canDelete = \ctx nm _ -> isOwner un ctx nm 
+      -- canDelete = \ctx nm _ -> isOwner un ctx (Just nm)
       -- Omit as a default. I prefer delete not work and the programmer have to
       -- figure out why rather than being surprised that resources are disappearing!
 

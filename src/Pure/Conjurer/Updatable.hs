@@ -124,7 +124,7 @@ cachingToUpdate ws ctx nm =
           (ctx,nm,resource) 
           
       if did then do
-        req Fresh (readingAPI @resource)
+        req @_role Fresh (readingAPI @resource)
           (readProduct @resource)
           (ctx,nm)
         Router.goto (toReadRoute ctx nm)

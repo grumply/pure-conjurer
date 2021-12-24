@@ -56,8 +56,9 @@ class Listable resource where
 type ShouldPreloadPreviews = Bool
 
 cachingToList 
-  :: forall resource.
-    ( Typeable resource
+  :: forall _role resource.
+    ( Typeable _role
+    , Typeable resource
     , Routable resource
     , Theme resource
     , Pure (Preview resource)
@@ -72,7 +73,7 @@ cachingToList shouldPreloadPreviews _ ctx =
   producingKeyed ctx producer (\ctx -> consuming (maybe "Not Found" (consumer ctx)))
   where
     producer ctx = do
-      rsp <- req Cached (readingAPI @resource)
+      rsp <- req @_role Cached (readingAPI @resource)
         (readListing @resource) 
         ctx
       pure rsp
@@ -90,7 +91,7 @@ cachingToList shouldPreloadPreviews _ ctx =
           | otherwise             = id
           where
             load _ = void $ forkIO $ void $
-              req Cached (readingAPI @resource) 
+              req @_role Cached (readingAPI @resource) 
                 (readProduct @resource) 
                 (ctx,nm)
                 
