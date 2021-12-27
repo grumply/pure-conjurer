@@ -203,9 +203,10 @@ tryCreate Permissions {..} Callbacks {..} ctx a0 = do
                 Sorcerer.transact (PreviewsStream ctx) (SetPreviewItem name pre)
               caching <- isCaching @a
               when caching do
-                cacheProduct ctx name pro
-                cachePreview ctx name pre
-                cacheListing ctx lst
+                !_ <- cacheProduct ctx name pro
+                !_ <- cachePreview ctx name pre
+                !_ <- cacheListing ctx lst
+                pure ()
               onCreate ctx name new pro pre lst
               pure (Just (name,pro,pre,lst))
             _ ->
@@ -245,9 +246,10 @@ tryUpdate Permissions {..} Callbacks {..} ctx name a0 = do
                 Sorcerer.transact (PreviewsStream ctx) (SetPreviewItem name pre)
               caching <- isCaching @a
               when caching do
-                cacheProduct ctx name pro
-                cachePreview ctx name pre
-                cacheListing ctx lst
+                !_ <- cacheProduct ctx name pro
+                !_ <- cachePreview ctx name pre
+                !_ <- cacheListing ctx lst
+                pure ()
               onUpdate ctx name new pro pre lst
               pure (Just (pro,pre,lst))
             _ ->
@@ -283,9 +285,10 @@ tryAmend Permissions {..} Callbacks {..} ctx name a = do
             Sorcerer.transact (PreviewsStream ctx) (SetPreviewItem name pre)
           caching <- isCaching @a
           when caching do
-            cacheProduct ctx name pro
-            cachePreview ctx name pre
-            cacheListing ctx lst
+            !_ <- cacheProduct ctx name pro
+            !_ <- cachePreview ctx name pre
+            !_ <- cacheListing ctx lst
+            pure ()
           onAmend ctx name new pro pre lst a
           pure (Just (pro,pre,lst))
         _ ->
@@ -319,9 +322,10 @@ tryDelete Permissions {..} Callbacks {..} ctx name = do
           onDelete ctx name r pro pre lst
           caching <- isCaching @a
           when caching do
-            deleteProduct ctx name
-            deletePreview ctx name
-            cacheListing ctx lst
+            !_ <- deleteProduct ctx name
+            !_ <- deletePreview ctx name
+            !_ <- cacheListing ctx lst
+            pure ()
           pure (Just (pro,pre,lst))
         _ -> do
           pure Nothing
