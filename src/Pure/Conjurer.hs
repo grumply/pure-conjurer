@@ -1002,18 +1002,9 @@ data Route a
 data SomeRoute _role
   = forall resource. 
     ( Typeable resource
-    , Theme resource
     , Routable resource
-    , FromJSON (Resource resource), ToJSON (Resource resource), Default (Resource resource)
     , FromJSON (Context resource), ToJSON (Context resource), Pathable (Context resource), Ord (Context resource)
     , FromJSON (Name resource), ToJSON (Name resource), Pathable (Name resource), Ord (Name resource)
-    , FromJSON (Preview resource)
-    , FromJSON (Product resource)
-    , Formable (Resource resource)
-    , Readable resource
-    , Updatable _role resource
-    , Listable resource
-    , Creatable _role resource
     , Ownable resource
     ) => SomeRoute (Route resource)
 
