@@ -76,7 +76,7 @@ class Formable rec where
   form :: (rec -> IO ()) -> (rec -> IO View) -> rec -> View
   default form :: (Typeable rec, Generic rec, GFormable (Rep rec)) => (rec -> IO ()) -> (rec -> IO View) -> rec -> View
   form onSubmit onPreview initial = 
-    run PreviewingForm 
+    View PreviewingForm 
       { runForm = \f x -> gform (f . G.to) (G.from x)
       , ..
       }
@@ -86,15 +86,15 @@ instance {-# INCOHERENT #-} (Typeable x, Generic x, GFormable (Rep x)) => Formab
 class GFormable f where
   gform :: (forall x. f x -> IO ()) -> f x -> View
 
-instance ( KnownSymbol name, Typeable x, GFormable x ) => GFormable (M1 D (MetaData name _m _p _nt) x) where
+instance (Typeable x, GFormable x) => GFormable (M1 D (MetaData name _m _p _nt) x) where
+  gform f (M1 x) = gform (f . M1) x
+
+instance (KnownSymbol name, Typeable x, GFormable x) => GFormable (M1 C (MetaCons name _fix True) x) where
   gform f (M1 x) = 
     Div <| Class (toTxt (symbolVal @name Proxy)) |>
       [ H2 <||> [ txt (symbolVal @name Proxy) ]
       , gform (f . M1) x
       ]
-
-instance ( GFormable x) => GFormable (M1 C (MetaCons name _fix True) x) where
-  gform f (M1 x) = gform (f . M1) x
 
 instance 
   ( Typeable x, GFormable x

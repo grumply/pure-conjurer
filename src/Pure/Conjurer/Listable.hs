@@ -30,12 +30,12 @@ class Listable resource where
   default toList 
     :: ( Typeable resource
        , Routable resource
-       , Theme resource
        , Pure (Preview resource)
        , FromJSON (Preview resource)
        , ToJSON (Context resource), FromJSON (Context resource)
        , ToJSON (Name resource), FromJSON (Name resource)
        , Eq (Context resource)
+       , Pathable (Context resource), Pathable (Name resource)
        ) => WebSocket -> Context resource -> View
   toList ws ctx =
     producingKeyed ctx producer (\ctx -> consuming (maybe "Not Found" (consumer ctx)))
@@ -44,8 +44,9 @@ class Listable resource where
         request (readingAPI @resource) ws 
           (readListing @resource) 
 
+      consumer :: Context resource -> [(Name resource,Preview resource)] -> View
       consumer ctx ps = 
-        Ul <| Themed @resource . Themed @Listing |> 
+        Ul <| Themed @Listing |> 
           [ Li <| go (toReadRoute ctx nm) |> 
             [ View p ] 
           | (nm,p) <- ps 
@@ -60,7 +61,6 @@ cachingToList
     ( Typeable _role
     , Typeable resource
     , Routable resource
-    , Theme resource
     , Pure (Preview resource)
     , FromJSON (Preview resource)
     , ToJSON (Context resource), FromJSON (Context resource), Ord (Context resource)
@@ -79,7 +79,7 @@ cachingToList shouldPreloadPreviews _ ctx =
       pure rsp
 
     consumer ctx ps = 
-      Ul <| Themed @resource . Themed @Listing |> 
+      Ul <| Themed @Listing |> 
         [ Li <| go (toReadRoute ctx nm) . preload ctx nm |> 
           [ View p ] 
         | (nm,p) <- ps 
@@ -95,10 +95,3 @@ cachingToList shouldPreloadPreviews _ ctx =
                 (readProduct @resource) 
                 (ctx,nm)
                 
-instance {-# INCOHERENT #-}
-  ( ToJSON (Context resource), FromJSON (Context resource), Pathable (Context resource), Eq (Context resource)
-  , ToJSON (Name resource), FromJSON (Name resource), Pathable (Name resource), Eq (Name resource)
-  , Theme resource
-  , FromJSON (Preview resource)
-  , Pure (Preview resource)
-  ) => Listable resource

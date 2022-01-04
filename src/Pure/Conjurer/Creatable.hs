@@ -32,7 +32,6 @@ class Creatable _role resource where
   default toCreate 
     :: ( Typeable resource, Typeable _role
        , Routable resource
-       , Theme resource
        , ToJSON (Resource resource), FromJSON (Resource resource), Default (Resource resource)
        , ToJSON (Context resource), FromJSON (Context resource)
        , FromJSON (Name resource)
@@ -53,7 +52,7 @@ class Creatable _role resource where
           case r of
             Nothing -> pure "Failed to preview."
             Just (ctx,nm,pre,pro,res) -> pure do
-              Div <| Themed @resource . Themed @Previewing |>
+              Div <| Themed @Previewing |>
                 [ View pre
                 , View pro
                 ]
@@ -65,14 +64,13 @@ class Creatable _role resource where
               (ctx,resource)
           for_ mi (Router.goto . toReadRoute ctx)
       in 
-        Div <| Themed @resource . Themed @Creating |>
+        Div <| Themed @Creating |>
           [ form onSubmit onPreview def
           ]
 
 instance {-# INCOHERENT #-}
   ( Typeable resource, Typeable _role
   , Routable resource
-  , Theme resource
   , ToJSON (Resource resource), FromJSON (Resource resource), Default (Resource resource)
   , ToJSON (Context resource), FromJSON (Context resource)
   , FromJSON (Name resource)

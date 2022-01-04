@@ -28,17 +28,17 @@ class Readable resource where
   toRead :: WebSocket -> Context resource -> Name resource -> View
   default toRead 
     :: ( Typeable resource
-       , Theme resource
        , Pure (Product resource)
        , FromJSON (Context resource), ToJSON (Context resource)
        , FromJSON (Name resource), ToJSON (Name resource)
        , FromJSON (Product resource)
        , Eq (Context resource)
        , Eq (Name resource)
+       , Pathable (Context resource)
        ) => WebSocket -> Context resource -> Name resource -> View
   toRead = 
     toReadWith $ \_ _ ->
-      maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ View x ])
+      maybe "Not Found" (\x -> Div <| Themed @Reading |> [ View x ])
 
 toReadWith
   :: forall resource.
@@ -80,7 +80,6 @@ cachingToRead
   :: forall _role resource.
     ( Typeable _role
     , Typeable resource
-    , Theme resource
     , Pure (Product resource)
     , FromJSON (Context resource), ToJSON (Context resource), Ord (Context resource)
     , FromJSON (Name resource), ToJSON (Name resource), Ord (Name resource)
@@ -91,12 +90,4 @@ cachingToRead
   => WebSocket -> Context resource -> Name resource -> View
 cachingToRead = 
   cachingToReadWith @_role $ \_ _ ->
-    maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Reading |> [ View x ])
-
-instance {-# INCOHERENT #-}
-  ( Theme resource
-  , ToJSON (Context resource), FromJSON (Context resource), Eq (Context resource)
-  , ToJSON (Name resource), FromJSON (Name resource), Eq (Name resource)
-  , FromJSON (Product resource)
-  , Pure (Product resource)
-  ) => Readable resource
+    maybe "Not Found" (\x -> Div <| Themed @Reading |> [ View x ])

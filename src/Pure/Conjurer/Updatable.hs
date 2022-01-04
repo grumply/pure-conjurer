@@ -32,7 +32,6 @@ class Updatable _role resource where
   default toUpdate 
     :: ( Typeable resource, Typeable _role
        , Routable resource
-       , Theme resource
        , ToJSON (Context resource), FromJSON (Context resource)
        , ToJSON (Name resource), FromJSON (Name resource)
        , ToJSON (Resource resource), FromJSON (Resource resource)
@@ -52,7 +51,7 @@ class Updatable _role resource where
         request (publishingAPI @resource) ws 
           (readResource @resource) 
 
-      consumer = maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Updating |> [ form onSubmit onPreview x ]) 
+      consumer = maybe "Not Found" (\x -> Div <| Themed @Updating |> [ form onSubmit onPreview x ]) 
       
       onPreview resource = do
         r <- sync do
@@ -62,7 +61,7 @@ class Updatable _role resource where
         case r of
           Nothing -> pure "Failed to preview."
           Just (ctx,nm,pre,pro,res) -> pure do
-            Div <| Themed @resource . Themed @Previewing |>
+            Div <| Themed @Previewing |>
               [ View pre
               , View pro
               ]
@@ -81,7 +80,6 @@ class Updatable _role resource where
 cachingToUpdate 
   :: forall _role resource.
     ( Typeable resource, Typeable _role
-    , Theme resource
     , Routable resource
     , ToJSON (Context resource), FromJSON (Context resource), Ord (Context resource)
     , ToJSON (Name resource), FromJSON (Name resource), Ord (Name resource)
@@ -102,7 +100,7 @@ cachingToUpdate ws ctx nm =
       request (publishingAPI @resource) ws 
         (readResource @resource) 
 
-    consumer = maybe "Not Found" (\x -> Div <| Themed @resource . Themed @Updating |> [ form onSubmit onPreview x ]) 
+    consumer = maybe "Not Found" (\x -> Div <| Themed @Updating |> [ form onSubmit onPreview x ]) 
     
     onPreview resource = do
       r <- sync do
@@ -112,7 +110,7 @@ cachingToUpdate ws ctx nm =
       case r of
         Nothing -> pure "Failed to preview."
         Just (ctx,nm,pre,pro,res) -> pure do
-          Div <| Themed @resource . Themed @Previewing |>
+          Div <| Themed @Previewing |>
             [ View pre
             , View pro
             ]
@@ -133,6 +131,7 @@ cachingToUpdate ws ctx nm =
 
 instance {-# INCOHERENT #-}
   ( Typeable _role
+  , Typeable resource
   , ToJSON (Context resource), FromJSON (Context resource), Pathable (Context resource), Eq (Context resource)
   , ToJSON (Name resource), FromJSON (Name resource), Pathable (Name resource), Eq (Name resource)
   , ToJSON (Resource resource), FromJSON (Resource resource)
@@ -141,5 +140,4 @@ instance {-# INCOHERENT #-}
   , Formable (Resource resource)
   , Pure (Preview resource)
   , Pure (Product resource)
-  , Theme resource
   ) => Updatable _role resource
