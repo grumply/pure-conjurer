@@ -61,15 +61,19 @@ instance Typeable x => Component (PreviewingForm x) where
   view PreviewingForm {..} Model {..} 
     | Just p <- preview =
       Div <||>
-        [ Button <| OnClick (\_ -> command Edit)   |> [ "Edit"   ]
-        , Button <| OnClick (\_ -> command Submit) |> [ "Submit" ]
-        , p
+        [ p
+        , Div <||>
+          [ Button <| OnClick (\_ -> command Edit)   |> [ "Edit"   ]
+          , Button <| OnClick (\_ -> command Submit) |> [ "Submit" ]
+          ]
         ]
     | otherwise =
       Div <||>
-        [ Button <| OnClick (\_ -> command Preview) |> [ "Preview" ]
-        , Button <| OnClick (\_ -> command Submit)  |> [ "Submit"  ]
-        , runForm (command . Update) current
+        [ runForm (command . Update) current
+        , Div <||>
+          [ Button <| OnClick (\_ -> command Preview) |> [ "Preview" ]
+          , Button <| OnClick (\_ -> command Submit)  |> [ "Submit"  ]
+          ]
         ]
 
 class Formable rec where
