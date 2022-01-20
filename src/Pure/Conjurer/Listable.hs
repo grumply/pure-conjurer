@@ -22,8 +22,9 @@ import Pure.WebSocket.Cache
 import Control.Concurrent
 import Data.Typeable
 
-data Listing
+data Listing a
 instance Theme Listing
+instance {-# INCOHERENT #-} Typeable a => Theme (Listing a)
 
 class Listable resource where
   toList :: WebSocket -> Context resource -> View
@@ -36,6 +37,7 @@ class Listable resource where
        , ToJSON (Name resource), FromJSON (Name resource)
        , Eq (Context resource)
        , Pathable (Context resource), Pathable (Name resource)
+       , Theme (Listing resource)
        ) => WebSocket -> Context resource -> View
   toList ws ctx =
     producingKeyed ctx producer (\ctx -> consuming (maybe "Not Found" (consumer ctx)))
@@ -46,7 +48,7 @@ class Listable resource where
 
       consumer :: Context resource -> [(Name resource,Preview resource)] -> View
       consumer ctx ps = 
-        Ul <| Themed @Listing |> 
+        Ul <| Themed @Listing . Themed @(Listing resource) |> 
           [ Li <| go (toReadRoute ctx nm) |> 
             [ View p ] 
           | (nm,p) <- ps 
@@ -67,6 +69,7 @@ cachingToList
     , ToJSON (Name resource), FromJSON (Name resource), Ord (Name resource)
     , FromJSON (Product resource)
     , Eq (Context resource)
+    , Theme (Listing resource)
     ) 
   => ShouldPreloadPreviews -> WebSocket -> Context resource -> View
 cachingToList shouldPreloadPreviews _ ctx =
@@ -79,7 +82,7 @@ cachingToList shouldPreloadPreviews _ ctx =
       pure rsp
 
     consumer ctx ps = 
-      Ul <| Themed @Listing |> 
+      Ul <| Themed @Listing . Themed @(Listing resource) |> 
         [ Li <| go (toReadRoute ctx nm) . preload ctx nm |> 
           [ View p ] 
         | (nm,p) <- ps 

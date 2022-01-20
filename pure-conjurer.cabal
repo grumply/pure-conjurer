@@ -28,6 +28,7 @@ library
     , pure-marker
     , pure-maybe
     , pure-render
+    , pure-theme
     , pure-time
     , pure-txt
     , pure-router

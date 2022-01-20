@@ -10,6 +10,7 @@ import Pure.Conjurer.Resource
 import Pure.Data.JSON
 import Pure.Data.Txt (FromTxt(..))
 import Pure.Sorcerer as Sorcerer
+import Pure.Theme
 
 import Data.Hashable
 
@@ -19,6 +20,8 @@ import GHC.Generics
 import Prelude
 
 data family Preview a :: *
+
+instance Theme Preview
 
 type Previewing = Bool
 class Previewable a where

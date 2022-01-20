@@ -8,6 +8,7 @@ import Pure.Conjurer.Resource
 import Pure.Data.JSON
 import Pure.Data.Txt
 import Pure.Sorcerer as Sorcerer
+import Pure.Theme
 
 import Data.Hashable
 
@@ -17,6 +18,8 @@ import GHC.Generics
 import Prelude
 
 data family Product a :: *
+
+instance Theme Product
 
 type Previewing = Bool
 class Producible a where

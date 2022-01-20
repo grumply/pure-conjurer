@@ -22,10 +22,12 @@ import Pure.WebSocket.Cache
 
 import Data.Typeable
 
-data Updating
-data Previewing
+data Updating a
+data Previewing a
 instance Theme Updating
+instance {-# INCOHERENT #-} Typeable a => Theme (Updating a)
 instance Theme Previewing
+instance {-# INCOHERENT #-} Typeable a => Theme (Previewing a)
 
 class Updatable _role resource where
   toUpdate :: WebSocket -> Context resource -> Name resource -> View
@@ -42,6 +44,8 @@ class Updatable _role resource where
        , Pure (Product resource)
        , Eq (Context resource)
        , Eq (Name resource)
+       , Theme (Updating resource)
+       , Theme (Previewing resource)
        ) => WebSocket -> Context resource -> Name resource -> View
   toUpdate ws ctx nm =
     authorize @_role (Access ws id defaultOnRegistered) $ \_ ->
@@ -51,7 +55,7 @@ class Updatable _role resource where
         request (publishingAPI @resource) ws 
           (readResource @resource) 
 
-      consumer = maybe "Not Found" (\x -> Div <| Themed @Updating |> [ form onSubmit onPreview x ]) 
+      consumer = maybe "Not Found" (\x -> Div <| Themed @Updating . Themed @(Updating resource) |> [ form onSubmit onPreview x ]) 
       
       onPreview resource = do
         r <- sync do
@@ -61,7 +65,7 @@ class Updatable _role resource where
         case r of
           Nothing -> pure "Failed to preview."
           Just (ctx,nm,pre,pro,res) -> pure do
-            Div <| Themed @Previewing |>
+            Div <| Themed @Previewing . Themed @(Previewing resource) |>
               [ View pre
               , View pro
               ]
@@ -91,6 +95,8 @@ cachingToUpdate
     , Pure (Product resource)
     , Eq (Context resource)
     , Eq (Name resource)
+    , Theme (Updating resource)
+    , Theme (Previewing resource)
     ) => WebSocket -> Context resource -> Name resource -> View
 cachingToUpdate ws ctx nm =
   authorize @_role (Access ws id defaultOnRegistered) $ \_ ->
@@ -100,7 +106,7 @@ cachingToUpdate ws ctx nm =
       request (publishingAPI @resource) ws 
         (readResource @resource) 
 
-    consumer = maybe "Not Found" (\x -> Div <| Themed @Updating |> [ form onSubmit onPreview x ]) 
+    consumer = maybe "Not Found" (\x -> Div <| Themed @Updating . Themed @(Updating resource) |> [ form onSubmit onPreview x ]) 
     
     onPreview resource = do
       r <- sync do
@@ -110,7 +116,7 @@ cachingToUpdate ws ctx nm =
       case r of
         Nothing -> pure "Failed to preview."
         Just (ctx,nm,pre,pro,res) -> pure do
-          Div <| Themed @Previewing |>
+          Div <| Themed @Previewing . Themed @(Previewing resource) |>
             [ View pre
             , View pro
             ]
@@ -140,4 +146,6 @@ instance {-# INCOHERENT #-}
   , Formable (Resource resource)
   , Pure (Preview resource)
   , Pure (Product resource)
+  , Theme (Updating resource)
+  , Theme (Previewing resource)
   ) => Updatable _role resource

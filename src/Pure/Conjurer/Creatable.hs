@@ -24,8 +24,9 @@ import Pure.WebSocket
 
 import Data.Typeable
 
-data Creating
+data Creating a
 instance Theme Creating
+instance {-# INCOHERENT #-} Typeable a => Theme (Creating a)
 
 class Creatable _role resource where
   toCreate :: WebSocket -> Context resource -> View
@@ -40,6 +41,8 @@ class Creatable _role resource where
        , Formable (Resource resource)
        , Pure (Preview resource)
        , Pure (Product resource)
+       , Theme (Creating resource)
+       , Theme (Previewing resource)
        ) => WebSocket -> Context resource -> View
   toCreate ws ctx =
     authorize @_role (Access ws id defaultOnRegistered) $ \_ -> 
@@ -52,7 +55,7 @@ class Creatable _role resource where
           case r of
             Nothing -> pure "Failed to preview."
             Just (ctx,nm,pre,pro,res) -> pure do
-              Div <| Themed @Previewing |>
+              Div <| Themed @Previewing . Themed @(Previewing resource) |>
                 [ View pre
                 , View pro
                 ]
@@ -64,7 +67,7 @@ class Creatable _role resource where
               (ctx,resource)
           for_ mi (Router.goto . toReadRoute ctx)
       in 
-        Div <| Themed @Creating |>
+        Div <| Themed @Creating . Themed @(Creating resource) |>
           [ form onSubmit onPreview def
           ]
 
@@ -79,4 +82,6 @@ instance {-# INCOHERENT #-}
   , Formable (Resource resource)
   , Pure (Preview resource)
   , Pure (Product resource)
+  , Theme (Creating resource)
+  , Theme (Previewing resource)
   ) => Creatable _role resource
