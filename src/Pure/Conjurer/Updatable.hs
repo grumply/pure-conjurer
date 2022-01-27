@@ -34,16 +34,14 @@ class Updatable _role resource where
   default toUpdate 
     :: ( Typeable resource, Typeable _role
        , Routable resource
-       , ToJSON (Context resource), FromJSON (Context resource)
-       , ToJSON (Name resource), FromJSON (Name resource)
+       , ToJSON (Context resource), FromJSON (Context resource), Ord (Context resource)
+       , ToJSON (Name resource), FromJSON (Name resource), Ord (Name resource)
        , ToJSON (Resource resource), FromJSON (Resource resource)
        , FromJSON (Preview resource)
        , FromJSON (Product resource)
        , Formable (Resource resource)
        , Pure (Preview resource)
        , Pure (Product resource)
-       , Eq (Context resource)
-       , Eq (Name resource)
        , Theme (Updating resource)
        , Theme (Previewing resource)
        ) => WebSocket -> Context resource -> Name resource -> View
@@ -75,7 +73,8 @@ class Updatable _role resource where
           request (publishingAPI @resource) ws 
             (updateResource @resource) 
             (ctx,nm,resource)
-            
+        flush @_role (readingAPI @resource) (readPreview @resource) (ctx,nm)
+        flush @_role (readingAPI @resource) (readProduct @resource) (ctx,nm)
         if did then
           Router.goto (toReadRoute ctx nm)
         else
@@ -93,8 +92,6 @@ cachingToUpdate
     , Formable (Resource resource)
     , Pure (Preview resource)
     , Pure (Product resource)
-    , Eq (Context resource)
-    , Eq (Name resource)
     , Theme (Updating resource)
     , Theme (Previewing resource)
     ) => WebSocket -> Context resource -> Name resource -> View
@@ -128,9 +125,8 @@ cachingToUpdate ws ctx nm =
           (ctx,nm,resource) 
           
       if did then do
-        req @_role Fresh (readingAPI @resource)
-          (readProduct @resource)
-          (ctx,nm)
+        flush @_role (readingAPI @resource) (readPreview @resource) (ctx,nm)
+        flush @_role (readingAPI @resource) (readProduct @resource) (ctx,nm)
         Router.goto (toReadRoute ctx nm)
       else 
         pure ()
@@ -138,8 +134,8 @@ cachingToUpdate ws ctx nm =
 instance {-# INCOHERENT #-}
   ( Typeable _role
   , Typeable resource
-  , ToJSON (Context resource), FromJSON (Context resource), Pathable (Context resource), Eq (Context resource)
-  , ToJSON (Name resource), FromJSON (Name resource), Pathable (Name resource), Eq (Name resource)
+  , ToJSON (Context resource), FromJSON (Context resource), Pathable (Context resource), Ord (Context resource)
+  , ToJSON (Name resource), FromJSON (Name resource), Pathable (Name resource), Ord (Name resource)
   , ToJSON (Resource resource), FromJSON (Resource resource)
   , FromJSON (Preview resource)
   , FromJSON (Product resource)

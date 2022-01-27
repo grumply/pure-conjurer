@@ -21,6 +21,7 @@ import Pure.Maybe
 import Pure.Router as Router
 import Pure.Sync
 import Pure.WebSocket
+import Pure.WebSocket.Cache (flush)
 
 import Data.Typeable
 
@@ -34,8 +35,8 @@ class Creatable _role resource where
     :: ( Typeable resource, Typeable _role
        , Routable resource
        , ToJSON (Resource resource), FromJSON (Resource resource), Default (Resource resource)
-       , ToJSON (Context resource), FromJSON (Context resource)
-       , FromJSON (Name resource)
+       , ToJSON (Context resource), FromJSON (Context resource), Ord (Context resource)
+       , ToJSON (Name resource), FromJSON (Name resource), Ord (Name resource)
        , FromJSON (Preview resource)
        , FromJSON (Product resource)
        , Formable (Resource resource)
@@ -65,7 +66,12 @@ class Creatable _role resource where
             request (publishingAPI @resource) ws 
               (createResource @resource) 
               (ctx,resource)
-          for_ mi (Router.goto . toReadRoute ctx)
+
+          for_ mi $ \nm -> do
+            flush @_role (readingAPI @resource) (readPreview @resource) (ctx,nm)
+            flush @_role (readingAPI @resource) (readProduct @resource) (ctx,nm)
+            Router.goto (toReadRoute ctx nm)
+
       in 
         Div <| Themed @Creating . Themed @(Creating resource) |>
           [ form onSubmit onPreview def
@@ -75,8 +81,8 @@ instance {-# INCOHERENT #-}
   ( Typeable resource, Typeable _role
   , Routable resource
   , ToJSON (Resource resource), FromJSON (Resource resource), Default (Resource resource)
-  , ToJSON (Context resource), FromJSON (Context resource)
-  , FromJSON (Name resource)
+  , ToJSON (Context resource), FromJSON (Context resource), Ord (Context resource)
+  , ToJSON (Name resource), FromJSON (Name resource), Ord (Name resource)
   , FromJSON (Preview resource)
   , FromJSON (Product resource)
   , Formable (Resource resource)
