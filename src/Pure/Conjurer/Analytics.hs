@@ -274,15 +274,13 @@ finalize decay@(Milliseconds d _) now@(Milliseconds n _) Analyzer { analyses, ..
 
 analyzeAll :: Time -> IO Analyses
 analyzeAll _decay@(Milliseconds (fromIntegral -> d) _) = do 
-  !ec <- eventsCount
-  !b <- Bloom.new 0.001 ec
+  ec <- eventsCount
+  b <- Bloom.new 0.001 ec
   let start = Analyzer Map.empty Map.empty b
   evs <- Sorcerer.events GlobalAnalyticsStream
   analyzer <- foldM analyzeGlobalStream start evs
   now <- time
-  let !as = analyses (finalize _decay now analyzer)
-  print as
-  pure as
+  pure (analyses (finalize _decay now analyzer))
   where
     analyzeGlobalStream !(Analyzer {..}) = \case
 
