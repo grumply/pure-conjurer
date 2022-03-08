@@ -1125,7 +1125,7 @@ generateStatic
     ) => WebSocket -> IO ()
 generateStatic = generateStaticWith @a "dist/static/" defaultTemplate
 
-defaultTemplate :: (Pure a) => a -> IO Txt
+defaultTemplate :: (Typeable a, Pure a) => a -> IO Txt
 defaultTemplate a = pure $
   "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"></head><body>" <> toTxt (View a) <> "</body></html>"
 

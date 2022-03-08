@@ -200,8 +200,6 @@ instance Streamable GlobalAnalyticsMsg where
     "conjurer/analytics/analytics.stream"
 
 instance Manageable GlobalAnalyticsMsg where
-  -- Don't burden the IO subsystem with unimportant writes
-  threshold = Seconds 1 0
   batch = 100
 
 instance Aggregable GlobalAnalyticsMsg GlobalAnalytics where
