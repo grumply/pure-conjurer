@@ -63,16 +63,16 @@ instance Typeable x => Component (PreviewingForm x) where
       Div <||>
         [ p
         , Div <||>
-          [ Button <| OnClick (\_ -> command Edit)   |> [ "Edit"   ]
-          , Button <| OnClick (\_ -> command Submit) |> [ "Submit" ]
+          [ Button <| OnClick (\_ -> command (Edit @x))   |> [ "Edit"   ]
+          , Button <| OnClick (\_ -> command (Submit @x)) |> [ "Submit" ]
           ]
         ]
     | otherwise =
       Div <||>
-        [ runForm (command . Update) current
+        [ runForm (command . Update @x) current
         , Div <||>
-          [ Button <| OnClick (\_ -> command Preview) |> [ "Preview" ]
-          , Button <| OnClick (\_ -> command Submit)  |> [ "Submit"  ]
+          [ Button <| OnClick (\_ -> command (Preview @x)) |> [ "Preview" ]
+          , Button <| OnClick (\_ -> command (Submit @x))  |> [ "Submit"  ]
           ]
         ]
 
