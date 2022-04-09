@@ -44,7 +44,7 @@ class DefaultCallbacks x where
   callbacks :: Typeable x => Maybe Username -> Callbacks x
   callbacks _ = emptyCallbacks
 
-instance {-# INCOHERENT #-} Typeable x => DefaultCallbacks x
+instance {-# OVERLAPPABLE #-} Typeable x => DefaultCallbacks x
 
 instance Typeable a => Default (Callbacks a) where
   def = emptyCallbacks

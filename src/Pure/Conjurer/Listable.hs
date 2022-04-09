@@ -24,7 +24,7 @@ import Data.Typeable
 
 data Listing a
 instance Theme Listing
-instance {-# INCOHERENT #-} Typeable a => Theme (Listing a)
+instance {-# OVERLAPPABLE #-} Typeable a => Theme (Listing a)
 
 class Listable resource where
   toList :: WebSocket -> Context resource -> View

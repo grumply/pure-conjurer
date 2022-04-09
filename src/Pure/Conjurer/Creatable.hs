@@ -27,7 +27,7 @@ import Data.Typeable
 
 data Creating a
 instance Theme Creating
-instance {-# INCOHERENT #-} Typeable a => Theme (Creating a)
+instance {-# OVERLAPPABLE #-} Typeable a => Theme (Creating a)
 
 class Creatable _role resource where
   toCreate :: WebSocket -> Context resource -> View
@@ -77,7 +77,7 @@ class Creatable _role resource where
           [ form onSubmit onPreview def
           ]
 
-instance {-# INCOHERENT #-}
+instance {-# OVERLAPPABLE #-}
   ( Typeable resource, Typeable _role
   , Routable resource
   , ToJSON (Resource resource), FromJSON (Resource resource), Default (Resource resource)

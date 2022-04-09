@@ -25,9 +25,9 @@ import Data.Typeable
 data Updating a
 data Previewing a
 instance Theme Updating
-instance {-# INCOHERENT #-} Typeable a => Theme (Updating a)
+instance {-# OVERLAPPABLE #-} Typeable a => Theme (Updating a)
 instance Theme Previewing
-instance {-# INCOHERENT #-} Typeable a => Theme (Previewing a)
+instance {-# OVERLAPPABLE #-} Typeable a => Theme (Previewing a)
 
 class Updatable _role resource where
   toUpdate :: WebSocket -> Context resource -> Name resource -> View
@@ -131,7 +131,7 @@ cachingToUpdate ws ctx nm =
       else 
         pure ()
 
-instance {-# INCOHERENT #-}
+instance {-# OVERLAPPABLE #-}
   ( Typeable _role
   , Typeable resource
   , ToJSON (Context resource), FromJSON (Context resource), Pathable (Context resource), Ord (Context resource)

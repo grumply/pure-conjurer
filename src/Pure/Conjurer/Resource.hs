@@ -22,13 +22,23 @@ class Processable a where
   process :: Amending -> Resource a -> IO (Maybe (Resource a))
   process _ = pure . Just
 
-instance {-# INCOHERENT #-} Processable a
+instance {-# OVERLAPPABLE #-} Processable a
 
 class Amendable a where
   data Amend a :: *
   -- NOTE: Resources are not processed after amend!
   amend :: Amend a -> Resource a -> Maybe (Resource a)
   amend _ = Just
+
+instance {-# OVERLAPPABLE #-} Typeable a => ToJSON (Amend a) where
+  toJSON _ = 
+    let ty = show $ typeOf (undefined :: Amend a)
+    in error $ "No derived or explicit implementation of ToJSON (" <> ty <> ")"
+
+instance {-# OVERLAPPABLE #-} Typeable a => FromJSON (Amend a) where
+  parseJSON _ = 
+    let ty = show $ typeOf (undefined :: Amend a)
+    in error $ "No derived or explicit implementation of FromJSON (" <> ty <> ")"
 
 class Nameable a where
   toName :: Resource a -> Name a

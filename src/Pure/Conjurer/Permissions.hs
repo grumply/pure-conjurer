@@ -74,4 +74,4 @@ class DefaultPermissions x where
   default permissions :: Ownable x => Maybe Username -> Permissions x
   permissions = defaultPermissions
 
-instance {-# INCOHERENT #-} Ownable x => DefaultPermissions x
+instance {-# OVERLAPPABLE #-} Ownable x => DefaultPermissions x

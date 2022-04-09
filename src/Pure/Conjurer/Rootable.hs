@@ -11,4 +11,4 @@ class Rootable a where
   default root :: Typeable a => Txt
   root = "/" <> Txt.toLower (rep @a)
 
-instance {-# INCOHERENT #-} Typeable a => Rootable a
+instance {-# OVERLAPPABLE #-} Typeable a => Rootable a

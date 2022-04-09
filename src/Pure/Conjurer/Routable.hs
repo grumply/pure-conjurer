@@ -89,4 +89,4 @@ class Routable resource where
        ) => Context resource -> Txt
   toListRoute ctx = root @resource <> "/list" <> toPath ctx
 
-instance {-# INCOHERENT #-} (Typeable a, Pathable (Context a), Pathable (Name a)) => Routable a
+instance {-# OVERLAPPABLE #-} (Typeable a, Pathable (Context a), Pathable (Name a)) => Routable a
