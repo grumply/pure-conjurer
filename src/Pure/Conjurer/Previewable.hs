@@ -23,21 +23,23 @@ data family Preview a :: *
 
 instance Theme Preview
 
-type Previewing = Bool
 class Previewable a where
-  preview :: Previewing -> Context a -> Name a -> Resource a -> Product a -> IO (Preview a)
-  default preview :: Typeable a => Previewing -> Context a -> Name a -> Resource a -> Product a -> IO (Preview a)
-  preview _ _ _ _ _ =
+  preview :: Context a -> Name a -> Resource a -> Product a -> IO (Preview a)
+  default preview :: Typeable a => Context a -> Name a -> Resource a -> Product a -> IO (Preview a)
+  preview _ _ _ =
     let 
       tc = fromTxt (rep @a)
       err = "Previewable " <> tc 
-         <> " => preview :: Previewing -> Context " <> tc
+         <> " => preview :: Context " <> tc
          <> " -> Name " <> tc
          <> " -> Resource " <> tc 
          <> " -> Product " <> tc 
          <> " -> IO (Preview " <> tc <> "): Not implemented."
     in 
       pure (error err)
+
+  previewPreview :: Context a -> Name a -> Resource a -> Product a -> IO (Preview a)
+  previewPreview = preview
 
 data PreviewMsg a
   = SetPreview (Preview a)

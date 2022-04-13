@@ -17,10 +17,15 @@ import GHC.Generics
 
 data family Resource a :: *
 
-type Amending = Bool
+-- Processable is necessary in cases where constructing a resource requires
+-- server-side logic, like seeding with a server-generated UUID, etc...
+-- `process` is run before product creation, update, and preview.
 class Processable a where
-  process :: Amending -> Resource a -> IO (Maybe (Resource a))
-  process _ = pure . Just
+  process :: Resource a -> IO (Maybe (Resource a))
+  process = pure . Just
+
+  processPreview :: Resource a -> IO (Maybe (Resource a))
+  processPreview = process
 
 instance {-# OVERLAPPABLE #-} Processable a
 

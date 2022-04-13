@@ -20,7 +20,7 @@ data Callbacks resource = Callbacks
   , onUpdate   :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> [(Name resource,Preview resource)] -> IO ()
   , onDelete   :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> [(Name resource,Preview resource)] -> IO ()
   , onAmend    :: Context resource -> Name resource -> Resource resource -> Product resource -> Preview resource -> [(Name resource,Preview resource)] -> Amend resource -> IO ()
-  , onInteract :: Context resource -> Name resource -> Resource resource -> Action resource -> Reaction resource -> IO ()
+  , onInteract :: Context resource -> Name resource -> Product resource -> Action resource -> Reaction resource -> IO ()
   , onResource :: Context resource -> Name resource -> Resource resource -> IO ()
   , onRead     :: Context resource -> Name resource -> Product resource  -> IO ()
   , onPreview  :: Context resource -> Name resource -> Preview resource -> IO ()

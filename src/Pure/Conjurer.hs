@@ -184,7 +184,7 @@ tryCreate
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> Context a -> Resource a -> IO (Maybe (Name a,Product a,Preview a,[(Name a,Preview a)]))
 tryCreate Permissions {..} Callbacks {..} ctx a0 = do
-  ma <- process False a0
+  ma <- process a0
   case ma of
     Nothing -> pure Nothing
     Just a -> do
@@ -194,8 +194,8 @@ tryCreate Permissions {..} Callbacks {..} ctx a0 = do
         withLock ctx name do
           Sorcerer.observe (ResourceStream ctx name) (CreateResource a) >>= \case
             Added (new :: Resource a) -> do
-              pro <- produce False ctx name new Nothing
-              pre <- preview False ctx name new pro
+              pro <- produce ctx name new Nothing
+              pre <- preview ctx name new pro
               (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
               (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
               Sorcerer.write (IndexStream @a) (ResourceAdded ctx name)
@@ -228,7 +228,7 @@ tryUpdate
     , FromJSON (Amend a), ToJSON (Amend a)
     ) => Permissions a -> Callbacks a -> Context a -> Name a -> Resource a -> IO (Maybe (Product a,Preview a,[(Name a,Preview a)]))
 tryUpdate Permissions {..} Callbacks {..} ctx name a0 = do
-  ma <- process False a0
+  ma <- process a0
   case ma of
     Nothing -> pure Nothing
     Just a -> do
@@ -238,8 +238,8 @@ tryUpdate Permissions {..} Callbacks {..} ctx name a0 = do
           Sorcerer.transact (ResourceStream ctx name) (SetResource a) >>= \case
             Sorcerer.Update (new :: Resource a) -> do
               mpro <- Sorcerer.read (ProductStream ctx name)
-              pro <- produce False ctx name new mpro
-              pre <- preview False ctx name new pro
+              pro <- produce ctx name new mpro
+              pre <- preview ctx name new pro
               (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
               (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
               (Sorcerer.Update (Previews (lst :: [(Name a,Preview a)]))) <- 
@@ -277,8 +277,8 @@ tryAmend Permissions {..} Callbacks {..} ctx name a = do
       Sorcerer.transact (ResourceStream ctx name) (AmendResource a) >>= \case
         Sorcerer.Update (new :: Resource a) -> do
           mpro <- Sorcerer.read (ProductStream ctx name)
-          pro <- produce False ctx name new mpro
-          pre <- preview False ctx name new pro
+          pro <- produce ctx name new mpro
+          pre <- preview ctx name new pro
           (Sorcerer.Update (_ :: Product a)) <- Sorcerer.transact (ProductStream ctx name) (SetProduct pro)
           (Sorcerer.Update (_ :: Preview a)) <- Sorcerer.transact (PreviewStream ctx name) (SetPreview pre)
           (Sorcerer.Update (Previews (lst :: [(Name a,Preview a)]))) <- 
@@ -423,7 +423,7 @@ tryInteract
     ( Typeable a 
     , Amendable a
     , ToJSON (Amend a)
-    , FromJSON (Resource a), ToJSON (Resource a)
+    , FromJSON (Product a), ToJSON (Product a)
     , FromJSON (Amend a), ToJSON (Amend a)
     , Hashable (Context a), Pathable (Context a), Ord (Context a)
     , Hashable (Name a), Pathable (Name a), Ord (Name a)
@@ -431,12 +431,12 @@ tryInteract
 tryInteract Permissions {..} Callbacks {..} Interactions {..} ctx name action = do
   can <- canInteract ctx name action
   if can then do
-    mres <- Sorcerer.read (ResourceStream ctx name)
-    case mres of
+    mpro <- Sorcerer.read (ProductStream ctx name)
+    case mpro of
       Nothing -> pure Nothing
-      Just res -> do
-        reaction <- interact ctx name res action
-        onInteract ctx name res action reaction
+      Just pro -> do
+        reaction <- interact ctx name pro action
+        onInteract ctx name pro action reaction
         pure (Just reaction)
   else
     pure Nothing
@@ -584,7 +584,7 @@ handlePreviewResource permissions callbacks = responding do
     -- I don't like the ordering here, but process 
     -- needs to run before canCreate because it 
     -- may seed/alter the Context and/or Name.
-    mres <- process True res0
+    mres <- processPreview res0
     case mres of
       Nothing -> pure Nothing
       Just res -> do
@@ -592,8 +592,8 @@ handlePreviewResource permissions callbacks = responding do
         can <- canCreate permissions ctx name res
         if can then do
           mpro <- Sorcerer.read (ProductStream ctx name)
-          pro <- produce True ctx name res mpro
-          pre <- preview True ctx name res pro
+          pro <- producePreview ctx name res mpro
+          pre <- previewPreview ctx name res pro
           pure (Just (ctx,name,pre,pro,res))
         else
           pure Nothing
@@ -624,8 +624,8 @@ handlePreviewAmendResource permissions callbacks = responding do
             Nothing -> pure Nothing
             Just res -> do
               mpro <- Sorcerer.read (ProductStream ctx name)
-              pro <- produce True ctx name res mpro
-              pre <- preview True ctx name res pro
+              pro <- producePreview ctx name res mpro
+              pre <- previewPreview ctx name res pro
               pure (Just (ctx,name,pre,pro,res))
         else
           pure Nothing
@@ -636,7 +636,7 @@ handleInteractResource
     ( Typeable a 
     , Amendable a
     , FromJSON (Amend a), ToJSON (Amend a)
-    , FromJSON (Resource a), ToJSON (Resource a)
+    , FromJSON (Product a), ToJSON (Product a)
     , FromJSON (Action a)
     , ToJSON (Reaction a)
     , FromJSON (Context a), Hashable (Context a), Pathable (Context a), Ord (Context a)

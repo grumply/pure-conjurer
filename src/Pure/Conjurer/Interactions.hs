@@ -3,7 +3,7 @@ module Pure.Conjurer.Interactions where
 import Pure.Conjurer.Context
 import Pure.Conjurer.Name
 import Pure.Conjurer.Rep
-import Pure.Conjurer.Resource
+import Pure.Conjurer.Producible
 
 import Pure.Auth (Username)
 import Pure.Data.Txt (FromTxt(..))
@@ -38,7 +38,7 @@ instance {-# OVERLAPPABLE #-} Typeable a => FromJSON (Reaction a) where
     in error $ "No derived or explicit implementation of FromJSON (" <> ty <> ")"
 
 data Interactions a = Interactions
-  { interact :: Context a -> Name a -> Resource a -> Action a -> IO (Reaction a)
+  { interact :: Context a -> Name a -> Product a -> Action a -> IO (Reaction a)
   }
 
 class Typeable a => DefaultInteractions a where
@@ -50,7 +50,7 @@ class Typeable a => DefaultInteractions a where
       err = "Interactions from DefaultInteractions " <> tc 
          <> " => interact :: Context " <> tc
          <> " -> Name " <> tc
-         <> " -> Resource " <> tc 
+         <> " -> Product " <> tc 
          <> " -> Action " <> tc 
          <> " -> IO (Reaction " <> tc <> "): Not implemented."
       
