@@ -57,4 +57,4 @@ class Typeable a => DefaultInteractions a where
     in 
       Interactions (\_ _ _ _ -> error err)
 
-instance {-# OVERLAPPALE #-} Typeable x => DefaultInteractions x
+instance {-# OVERLAPPABLE #-} Typeable x => DefaultInteractions x

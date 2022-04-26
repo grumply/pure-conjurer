@@ -1,7 +1,7 @@
 module Pure.Conjurer.Formable (Formable(..),overwriteTitle) where
 
 import Pure.Conjurer.Fieldable
-import Pure.Elm.Component
+import Pure.Elm.Component hiding (state,modify,get)
 import Pure.Hooks
 
 import Data.Typeable
@@ -117,11 +117,11 @@ instance
   ) => GFormable ((:*:) a b) 
   where
     gform f (a :*: b) =
-      useState (FPS (unsafeCoerce a :: a x) (unsafeCoerce b :: b x)) $ \State {..} -> 
-        let FPS l r = state 
+      state (FPS (unsafeCoerce a :: a x) (unsafeCoerce b :: b x)) $ 
+        let FPS l r = get @(FormableProductState a b)
         in Div <||>
-            [ gform (\l -> f (unsafeCoerce l :*: unsafeCoerce r) >> modify (\(FPS _ r) -> FPS (unsafeCoerce l) r)) a
-            , gform (\r -> f (unsafeCoerce l :*: unsafeCoerce r) >> modify (\(FPS l _) -> FPS l (unsafeCoerce r))) b
+            [ gform (\l -> f (unsafeCoerce l :*: unsafeCoerce r) >> modify @(FormableProductState a b) (\(FPS _ r) -> FPS (unsafeCoerce l) r)) l
+            , gform (\r -> f (unsafeCoerce l :*: unsafeCoerce r) >> modify @(FormableProductState a b) (\(FPS l _) -> FPS l (unsafeCoerce r))) r
             ]
 
 instance 

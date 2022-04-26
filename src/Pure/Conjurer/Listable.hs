@@ -17,7 +17,7 @@ import Pure.Router as Router
 import Pure.Maybe
 import Pure.Sync
 import Pure.WebSocket
-import Pure.WebSocket.Cache
+import Pure.WebSocket.Cache hiding (sync)
 
 import Control.Concurrent
 import Data.Typeable
