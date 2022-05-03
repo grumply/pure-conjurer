@@ -1,8 +1,7 @@
 module Pure.Conjurer.Formable (Formable(..),overwriteTitle) where
 
 import Pure.Conjurer.Fieldable
-import Pure.Elm.Component hiding (state,modify,get)
-import Pure.Hooks
+import Pure.Elm.Fold
 
 import Data.Typeable
 import GHC.Generics as G
